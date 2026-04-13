@@ -21,7 +21,7 @@ TestCase {
         id: sourceComponent
 
         WeatherSource {
-            enabled: false
+            weatherEnabled: false
         }
     }
 
@@ -131,13 +131,13 @@ TestCase {
 
     function test_canFetchRejectsLocal() {
         const localSource = createSource({
-            "enabled": true,
+            "weatherEnabled": true,
             "latitude": 35.654444,
             "longitude": 139.744722,
             "timeZoneId": "Local"
         });
         const remoteSource = createSource({
-            "enabled": true,
+            "weatherEnabled": true,
             "latitude": 35.654444,
             "longitude": 139.744722,
             "timeZoneId": "Asia/Tokyo"

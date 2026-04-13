@@ -10,7 +10,7 @@ Item {
     property real latitude: NaN
     property real longitude: NaN
     property string timeZoneId: ""
-    property bool enabled: true
+    property bool weatherEnabled: true
     property int refreshIntervalMs: 15 * 60 * 1000
     property var sceneState: WeatherScene.defaultSceneState()
     property var rawSceneState: WeatherScene.defaultSceneState()
@@ -29,7 +29,7 @@ Item {
     property bool hasFetchedOnce: false
 
     function canFetch() {
-        return enabled && WeatherScene.eligibleForWeather(latitude, longitude, timeZoneId);
+        return weatherEnabled && WeatherScene.eligibleForWeather(latitude, longitude, timeZoneId);
     }
 
     function buildRequestUrl() {
@@ -244,7 +244,7 @@ Item {
     onLatitudeChanged: scheduleRefresh()
     onLongitudeChanged: scheduleRefresh()
     onTimeZoneIdChanged: scheduleRefresh()
-    onEnabledChanged: scheduleRefresh()
+    onWeatherEnabledChanged: scheduleRefresh()
 
     Component.onCompleted: scheduleRefresh()
 
