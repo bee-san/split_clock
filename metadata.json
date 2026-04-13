@@ -1,0 +1,24 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "bee@local",
+                "Name": "bee"
+            }
+        ],
+        "Category": "Date and Time",
+        "Description": "A split-card world clock with 24-hour time and daylight-aware colors.",
+        "Icon": "preferences-system-time",
+        "Id": "dev.bee.splitclock",
+        "License": "GPL-3.0-or-later",
+        "Name": "Split Clock",
+        "Version": "1.0.0",
+        "Website": "https://example.invalid"
+    },
+    "X-KDE-ParentApp": "org.kde.plasmashell",
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "X-Plasma-Provides": [
+        "org.kde.plasma.time"
+    ]
+}
