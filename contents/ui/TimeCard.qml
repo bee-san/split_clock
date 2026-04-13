@@ -4,6 +4,7 @@ import org.kde.kirigami as Kirigami
 import org.kde.plasma.clock
 
 import "SolarPalette.js" as SolarPalette
+import "WeatherScene.js" as WeatherScene
 
 Item {
     id: root
@@ -12,6 +13,13 @@ Item {
     property var entry: null
     property int visualRefreshCounter: 0
     property Component clockComponentOverride: null
+    property Component weatherComponentOverride: null
+    property var weatherStateOverride: null
+    property bool cinematicWeather: true
+    property bool hideDaytimeMoon: false
+    property bool reducedMotion: false
+    property real weatherIntensity: 1
+    property int weatherRefreshIntervalMinutes: 15
 
     function safeColor(colorValue, fallbackColor) {
         if (colorValue && colorValue.r !== undefined) {
@@ -86,6 +94,23 @@ Item {
 
     function clampRange(value, minimum, maximum) {
         return Math.max(minimum, Math.min(maximum, value));
+    }
+
+    function copyBody(body) {
+        const safeBody = body || {};
+
+        return {
+            "visible": safeBody.visible === true,
+            "x": safeBody.x !== undefined ? safeBody.x : 0.5,
+            "y": safeBody.y !== undefined ? safeBody.y : 0.82,
+            "sizeScale": safeBody.sizeScale !== undefined ? safeBody.sizeScale : 0,
+            "altitude": safeBody.altitude !== undefined ? safeBody.altitude : -90,
+            "azimuth": safeBody.azimuth !== undefined ? safeBody.azimuth : 180,
+            "illuminationFraction": safeBody.illuminationFraction !== undefined ? safeBody.illuminationFraction : 0,
+            "terminatorAngle": safeBody.terminatorAngle !== undefined ? safeBody.terminatorAngle : 0,
+            "isWaxing": safeBody.isWaxing !== false,
+            "isSimplified": safeBody.isSimplified === true
+        };
     }
 
     function maxCenterSeparation(sunDiameter, moonDiameter) {
@@ -229,6 +254,7 @@ Item {
 
     readonly property bool isLocalTimeZone: timeZoneId === "Local"
     readonly property QtObject activeClock: clockLoader.item
+    readonly property QtObject activeWeather: weatherLoader.item
     readonly property var resolvedEntry: entry || ({
         "label": timeZoneId,
         "subtitle": timeZoneId,
@@ -238,6 +264,7 @@ Item {
         "latitude": null,
         "longitude": null
     })
+    readonly property bool hasWeatherCoordinates: WeatherScene.eligibleForWeather(resolvedEntry.latitude, resolvedEntry.longitude, timeZoneId)
 
     readonly property color themeBackgroundColor: root.safeColor(Kirigami.Theme.backgroundColor, Qt.rgba(0.13, 0.14, 0.17, 1))
     readonly property color themeAltBackgroundColor: root.safeColor(Kirigami.Theme.alternateBackgroundColor, Qt.rgba(0.18, 0.19, 0.24, 1))
@@ -270,8 +297,69 @@ Item {
     }
 
     readonly property var phasePalette: SolarPalette.paletteFor(sampledDateTime, resolvedEntry.latitude, resolvedEntry.longitude, sampledOffsetText)
+    readonly property var weatherScene: {
+        if (weatherStateOverride !== null) {
+            return WeatherScene.normalizeSceneState(weatherStateOverride);
+        }
+
+        if (activeWeather && activeWeather.displaySceneState !== undefined) {
+            return WeatherScene.normalizeSceneState(activeWeather.displaySceneState);
+        }
+
+        if (activeWeather && activeWeather.sceneState !== undefined) {
+            return WeatherScene.normalizeSceneState(activeWeather.sceneState);
+        }
+
+        return WeatherScene.defaultSceneState();
+    }
+    readonly property var weatherVisualFromScene: {
+        if (weatherStateOverride !== null) {
+            return weatherScene;
+        }
+
+        if (activeWeather && activeWeather.transitionFromSceneState !== undefined) {
+            return WeatherScene.normalizeSceneState(activeWeather.transitionFromSceneState);
+        }
+
+        return weatherScene;
+    }
+    readonly property var weatherVisualToScene: {
+        if (weatherStateOverride !== null) {
+            return weatherScene;
+        }
+
+        if (activeWeather && activeWeather.transitionToSceneState !== undefined) {
+            return WeatherScene.normalizeSceneState(activeWeather.transitionToSceneState);
+        }
+
+        if (activeWeather && activeWeather.sceneState !== undefined) {
+            return WeatherScene.normalizeSceneState(activeWeather.sceneState);
+        }
+
+        return weatherScene;
+    }
+    readonly property real weatherVisualTransitionProgress: {
+        if (weatherStateOverride !== null) {
+            return 1;
+        }
+
+        return activeWeather && activeWeather.visualTransitionProgress !== undefined
+            ? Number(activeWeather.visualTransitionProgress)
+            : 1;
+    }
+    readonly property bool weatherVisualTransitionActive: (
+        weatherStateOverride === null
+        && activeWeather
+        && activeWeather.visualTransitionActive === true
+        && weatherVisualTransitionProgress < 1
+    )
+    readonly property string weatherFetchStatus: activeWeather && activeWeather.fetchStatus !== undefined ? activeWeather.fetchStatus : weatherScene.status
     readonly property bool isMidnightPhase: phasePalette.phase === "midnight"
     readonly property bool isNightPhase: phasePalette.phase === "night" || isMidnightPhase
+    readonly property bool isTwilightPhase: phasePalette.phase === "dawn"
+        || phasePalette.phase === "sunrise"
+        || phasePalette.phase === "sunset"
+        || phasePalette.phase === "dusk"
 
     readonly property real accentBlendStrength: isMidnightPhase ? 0.46 : (isNightPhase ? 0.42 : 0.34)
     readonly property real skyTopBlendStrength: isMidnightPhase ? 0.84 : (isNightPhase ? 0.76 : 0.62)
@@ -280,12 +368,113 @@ Item {
     readonly property real primaryTextBlendStrength: phasePalette.textBoost !== undefined ? phasePalette.textBoost : (isMidnightPhase ? 0.96 : (isNightPhase ? 0.9 : 0.28))
     readonly property real secondaryTextBlendStrength: Math.max(0.14, primaryTextBlendStrength * 0.82)
 
-    readonly property color accentColor: root.blendColors(themeHighlightColor, phasePalette.accent, accentBlendStrength)
-    readonly property color skyTopColor: root.blendColors(themeBackgroundColor, phasePalette.skyTop, skyTopBlendStrength)
-    readonly property color skyMidColor: root.blendColors(themeAltBackgroundColor, phasePalette.skyMid || phasePalette.accent, skyMidBlendStrength)
-    readonly property color skyBottomColor: root.blendColors(themeAltBackgroundColor, phasePalette.skyBottom, skyBottomBlendStrength)
-    readonly property color horizonGlowColor: root.blendColors(root.safeColor(phasePalette.horizonGlow, phasePalette.horizon), phasePalette.glow, 0.18)
-    readonly property color railGlowColor: root.withAlpha(root.blendColors(accentColor, phasePalette.glow, 0.28), isNightPhase ? 0.28 : 0.18)
+    readonly property color weatherToneColor: weatherScene.kind === "snow"
+        ? Qt.rgba(0.82, 0.88, 0.96, 1)
+        : (weatherScene.kind === "thunderstorm"
+            ? Qt.rgba(0.42, 0.48, 0.58, 1)
+            : (weatherScene.kind === "fog"
+                ? Qt.rgba(0.88, 0.91, 0.95, 1)
+                : Qt.rgba(0.72, 0.78, 0.86, 1)))
+    readonly property real weatherToneStrength: weatherScene.kind === "clear"
+        ? weatherScene.cloudOpacity * 0.08
+        : (weatherScene.kind === "snow"
+            ? 0.22
+            : (weatherScene.kind === "fog"
+                ? 0.18
+                : (weatherScene.kind === "thunderstorm"
+                    ? 0.16 + (weatherScene.storminess * 0.14)
+                    : 0.1 + (weatherScene.cloudOpacity * 0.08))))
+    readonly property real weatherDimStrength: weatherScene.skyDimming !== undefined ? weatherScene.skyDimming : 0
+    readonly property real weatherContrastStrength: weatherScene.contrastSoftening !== undefined ? weatherScene.contrastSoftening : 0
+    readonly property real weatherCoolStrength: weatherScene.coolTint !== undefined ? weatherScene.coolTint : 0
+    readonly property real weatherHumidityHaze: weatherScene.humidityHaze !== undefined ? weatherScene.humidityHaze : 0
+    readonly property real weatherHumidityBloom: weatherScene.humidityBloom !== undefined ? weatherScene.humidityBloom : 0
+    readonly property real weatherClearingStrength: weatherScene.clearingStrength !== undefined ? weatherScene.clearingStrength : 0
+    readonly property real weatherStarVisibilityFactor: weatherScene.starVisibilityFactor !== undefined ? weatherScene.starVisibilityFactor : 1
+    readonly property real weatherSunGlowFactor: weatherScene.sunGlowFactor !== undefined ? weatherScene.sunGlowFactor : 1
+    readonly property real weatherMoonGlowFactor: weatherScene.moonGlowFactor !== undefined ? weatherScene.moonGlowFactor : 1
+    readonly property real weatherOrbOpacity: Math.max(
+        0.44,
+        1 - (weatherScene.cloudOpacity * 0.24) - (weatherScene.fogOpacity * 0.12) - (weatherHumidityHaze * 0.06)
+    )
+    readonly property real weatherHorizonFade: weatherScene.horizonFade !== undefined ? weatherScene.horizonFade : 0
+    readonly property real weatherIntensityFactor: root.clampRange(weatherIntensity, 0.4, 1.4)
+    readonly property real weatherAtmosphereStrength: root.clampRange(
+        (
+            (weatherScene.cloudOpacity * 0.3)
+            + (weatherScene.fogOpacity * 0.46)
+            + (weatherContrastStrength * 0.18)
+            + (weatherHumidityHaze * 0.24)
+            + (weatherHumidityBloom * 0.1)
+        ) * weatherIntensityFactor,
+        0,
+        0.96
+    )
+    readonly property real orbSurfaceFlattening: root.clampRange(
+        (
+            (weatherScene.cloudOpacity * 0.26)
+            + (weatherScene.fogOpacity * 0.42)
+            + (weatherScene.celestialVeilOpacity * 0.28)
+            + (weatherHumidityHaze * 0.12)
+        ) * weatherIntensityFactor,
+        0,
+        0.86
+    )
+    readonly property real orbRimSoftening: root.clampRange(
+        (
+            (weatherScene.orbOcclusionOpacity * 0.42)
+            + (weatherScene.fogOpacity * 0.28)
+            + (weatherScene.horizonFade * 0.12)
+            + (weatherHumidityBloom * 0.12)
+            + (weatherClearingStrength * 0.06)
+        ) * weatherIntensityFactor,
+        0,
+        0.9
+    )
+    readonly property color orbAtmosphereTintColor: root.blendColors(
+        root.blendColors(root.skyMidColor, root.weatherCloudColor, 0.34 + (weatherDimStrength * 0.18)),
+        root.weatherFogColor,
+        weatherHumidityHaze * 0.18
+    )
+    readonly property real twilightWarmth: phasePalette.twilightWarmth !== undefined ? phasePalette.twilightWarmth : 0
+    readonly property real twilightCoolness: phasePalette.twilightCoolness !== undefined ? phasePalette.twilightCoolness : 0
+    readonly property real twilightBandOpacity: phasePalette.twilightBandOpacity !== undefined ? phasePalette.twilightBandOpacity : 0
+    readonly property real twilightHorizonBoost: phasePalette.twilightHorizonBoost !== undefined ? phasePalette.twilightHorizonBoost : 0
+    readonly property real seasonalSummerStrength: phasePalette.summerStrength !== undefined ? phasePalette.summerStrength : 0
+
+    readonly property color baseAccentColor: root.blendColors(themeHighlightColor, phasePalette.accent, accentBlendStrength)
+    readonly property color baseSkyTopColor: root.blendColors(themeBackgroundColor, phasePalette.skyTop, skyTopBlendStrength)
+    readonly property color baseSkyMidColor: root.blendColors(themeAltBackgroundColor, phasePalette.skyMid || phasePalette.accent, skyMidBlendStrength)
+    readonly property color baseSkyBottomColor: root.blendColors(themeAltBackgroundColor, phasePalette.skyBottom, skyBottomBlendStrength)
+    readonly property color baseHorizonGlowColor: root.blendColors(root.safeColor(phasePalette.horizonGlow, phasePalette.horizon), phasePalette.glow, 0.18)
+    readonly property color basePrimaryTextColor: root.blendColors(themeTextColor, Qt.rgba(1, 1, 1, 1), primaryTextBlendStrength)
+    readonly property color baseSecondaryTextColor: root.blendColors(themeTextColor, Qt.rgba(1, 1, 1, 1), secondaryTextBlendStrength * 0.78)
+
+    readonly property color accentColor: root.blendColors(baseAccentColor, weatherToneColor, weatherToneStrength * 0.42)
+    readonly property color skyTopColor: root.blendColors(
+        root.blendColors(baseSkyTopColor, weatherToneColor, weatherToneStrength + (weatherCoolStrength * 0.06)),
+        themeBackgroundColor,
+        weatherDimStrength
+    )
+    readonly property color skyMidColor: root.blendColors(
+        root.blendColors(baseSkyMidColor, weatherToneColor, weatherToneStrength + (weatherCoolStrength * 0.1)),
+        themeAltBackgroundColor,
+        weatherDimStrength * 0.82
+    )
+    readonly property color skyBottomColor: root.blendColors(
+        root.blendColors(baseSkyBottomColor, weatherToneColor, (weatherToneStrength * 0.76) + (weatherCoolStrength * 0.18)),
+        themeAltBackgroundColor,
+        weatherDimStrength * 0.66
+    )
+    readonly property color horizonGlowColor: root.blendColors(
+        root.blendColors(baseHorizonGlowColor, weatherToneColor, weatherToneStrength * 0.16),
+        skyMidColor,
+        (weatherHorizonFade * 0.4) + (weatherHumidityHaze * 0.08)
+    )
+    readonly property color railGlowColor: root.withAlpha(
+        root.blendColors(accentColor, phasePalette.glow, 0.28 + (weatherContrastStrength * 0.06)),
+        (isNightPhase ? 0.28 : 0.18) * (1 - (weatherContrastStrength * 0.18))
+    )
     readonly property color sunHaloColor: root.blendColors(phasePalette.orbHalo, accentColor, 0.14)
     readonly property color sunCoreColor: root.blendColors(phasePalette.orbCore, Qt.rgba(1, 1, 1, 1), 0.08)
     readonly property color sunRimColor: root.blendColors(phasePalette.orbRim || phasePalette.orbCore, Qt.rgba(1, 1, 1, 1), 0.18)
@@ -294,19 +483,97 @@ Item {
     readonly property color moonRimColor: root.blendColors(phasePalette.orbRim || phasePalette.orbCore, Qt.rgba(1, 1, 1, 1), 0.24)
     readonly property color moonShadowColor: root.withAlpha(root.blendColors(root.skyTopColor, root.themeBackgroundColor, 0.34), phasePalette.usesSimplifiedCelestial ? 0.98 : 0.94)
     readonly property color starColor: root.blendColors(root.primaryTextColor, moonCoreColor, 0.18)
-    readonly property color primaryTextColor: root.blendColors(themeTextColor, Qt.rgba(1, 1, 1, 1), primaryTextBlendStrength)
-    readonly property color secondaryTextColor: root.blendColors(themeTextColor, Qt.rgba(1, 1, 1, 1), secondaryTextBlendStrength * 0.78)
+    readonly property color primaryTextColor: root.blendColors(basePrimaryTextColor, Qt.rgba(1, 1, 1, 1), weatherContrastStrength * 0.08)
+    readonly property color secondaryTextColor: root.blendColors(baseSecondaryTextColor, Qt.rgba(1, 1, 1, 1), weatherContrastStrength * 0.04)
     readonly property color cardOutlineColor: root.withAlpha(root.blendColors(themeTextColor, accentColor, 0.22), isNightPhase ? 0.34 : 0.26)
     readonly property color titleShadowColor: root.withAlpha(root.blendColors(themeBackgroundColor, skyTopColor, 0.9), isNightPhase ? 0.14 : 0.1)
     readonly property color timeShadowColor: root.withAlpha(root.blendColors(themeBackgroundColor, skyMidColor, 0.92), isNightPhase ? 0.18 : 0.12)
     readonly property color topVignetteColor: root.withAlpha(root.blendColors(themeBackgroundColor, skyTopColor, 0.84), phasePalette.vignetteOpacity || 0.16)
     readonly property color edgeHighlightColor: root.withAlpha(root.blendColors(Qt.rgba(1, 1, 1, 1), sunRimColor, 0.14), isNightPhase ? 0.18 : 0.12)
+    readonly property color weatherCloudColor: root.blendColors(
+        root.skyMidColor,
+        Qt.rgba(1, 1, 1, 1),
+        (weatherScene.kind === "snow" ? 0.32 : 0.18) + (weatherHumidityHaze * 0.08)
+    )
+    readonly property color weatherCloudHighlightColor: root.blendColors(
+        root.weatherCloudColor,
+        Qt.rgba(1, 1, 1, 1),
+        (weatherScene.kind === "snow" ? 0.26 : 0.34) + (weatherHumidityBloom * 0.1)
+    )
+    readonly property color weatherCloudShadowColor: root.blendColors(root.skyMidColor, root.themeBackgroundColor, 0.42 + (weatherDimStrength * 0.08))
+    readonly property color weatherPrecipitationColor: root.blendColors(root.primaryTextColor, Qt.rgba(0.82, 0.92, 1, 1), 0.34)
+    readonly property color weatherFogColor: root.blendColors(
+        root.skyMidColor,
+        Qt.rgba(0.96, 0.98, 1, 1),
+        0.42 + (weatherHumidityHaze * 0.12)
+    )
+    readonly property color twilightWarmColor: root.blendColors(phasePalette.horizonGlow, Qt.rgba(1, 0.82, 0.68, 1), Math.min(0.42, twilightWarmth * 0.34))
+    readonly property color twilightCoolColor: root.blendColors(phasePalette.skyTop, phasePalette.accent, Math.min(0.56, twilightCoolness * 0.42))
 
     readonly property string cityLabel: resolvedEntry.city || resolvedEntry.label || timeZoneId
     readonly property string timeText: root.formatTimeValue(sampledDateTime)
+    readonly property real maxFeelsLikeTemperatureCelsius: {
+        if (weatherStateOverride !== null && weatherStateOverride.maxFeelsLikeTemperatureCelsius !== undefined) {
+            return Number(weatherStateOverride.maxFeelsLikeTemperatureCelsius);
+        }
+
+        return activeWeather && activeWeather.maxFeelsLikeTemperatureCelsius !== undefined
+            ? Number(activeWeather.maxFeelsLikeTemperatureCelsius)
+            : NaN;
+    }
+    readonly property bool hasMaxFeelsLikeTemperature: isFinite(maxFeelsLikeTemperatureCelsius)
+    readonly property string maxFeelsLikeTemperatureText: hasMaxFeelsLikeTemperature ? Math.round(maxFeelsLikeTemperatureCelsius) + "C" : ""
+    readonly property string weatherConditionGlyph: {
+        if (weatherScene.available !== true) {
+            return "";
+        }
+
+        if (weatherScene.kind === "thunderstorm") {
+            return "⚡";
+        }
+
+        if (weatherScene.kind === "snow") {
+            return "❄";
+        }
+
+        if (weatherScene.kind === "rain") {
+            return "☂";
+        }
+
+        if (weatherScene.kind === "fog") {
+            return "≋";
+        }
+
+        if (weatherScene.kind === "cloudy") {
+            return "☁";
+        }
+
+        return root.isNightPhase ? "☾" : "☀";
+    }
+    readonly property bool showWeatherStatusCluster: weatherFetchStatus !== "inactive"
+        && (weatherScene.available === true || hasMaxFeelsLikeTemperature)
     readonly property int zoneSeed: root.hashString(timeZoneId + "|" + cityLabel)
     readonly property var sunBody: phasePalette.sunBody || ({ "visible": false, "x": 0.5, "y": 0.82, "sizeScale": 0 })
     readonly property var moonBody: phasePalette.moonBody || ({ "visible": false, "x": 0.5, "y": 0.82, "sizeScale": 0 })
+    readonly property bool suppressSecondaryDayOrb: root.sunBody.visible
+        && root.moonBody.visible
+        && (root.hideDaytimeMoon || root.weatherScene.cloudOpacity >= 0.34 || root.weatherScene.fogOpacity >= 0.22)
+    readonly property var renderedSunBody: root.sunBody
+    readonly property var renderedMoonBody: {
+        const body = root.copyBody(root.moonBody);
+
+        if (root.suppressSecondaryDayOrb) {
+            body.visible = false;
+        }
+
+        return body;
+    }
+    readonly property color orbLightColor: root.renderedSunBody.visible
+        ? root.blendColors(root.sunHaloColor, Qt.rgba(1, 1, 1, 1), 0.34)
+        : root.blendColors(root.moonHaloColor, root.primaryTextColor, 0.18)
+    readonly property color orbLightAccentColor: root.renderedSunBody.visible
+        ? root.blendColors(root.sunCoreColor, root.twilightWarmColor, 0.2 + (root.twilightWarmth * 0.12))
+        : root.blendColors(root.moonCoreColor, Qt.rgba(0.88, 0.94, 1, 1), 0.22)
 
     readonly property real cardScale: Math.max(1, Math.min(width, height))
     readonly property real frameRadius: 0
@@ -319,13 +586,15 @@ Item {
     readonly property int cityFontSize: Math.max(14, Math.round(Math.min(textColumnWidth * 0.16, height * 0.22)))
     readonly property int timeFontSize: Math.max(28, Math.round(Math.min(textColumnWidth * 0.42, height * 0.64)))
     readonly property int minTimeFontSize: Math.max(20, Math.round(timeFontSize * 0.62))
-    readonly property int starCount: Math.max(0, Math.round((phasePalette.starDensity || 0) * 16))
-    readonly property real sunBodyBaseDiameter: root.bodyDiameter(sunBody)
-    readonly property real moonBodyBaseDiameter: root.bodyDiameter(moonBody)
+    readonly property int weatherMetricFontSize: Math.max(9, Math.round(Math.min(cardScale * 0.11, height * 0.12)))
+    readonly property int weatherGlyphFontSize: Math.max(10, Math.round(weatherMetricFontSize * 0.92))
+    readonly property int starCount: Math.max(0, Math.round((phasePalette.starDensity || 0) * 16 * weatherStarVisibilityFactor))
+    readonly property real sunBodyBaseDiameter: root.bodyDiameter(renderedSunBody)
+    readonly property real moonBodyBaseDiameter: root.bodyDiameter(renderedMoonBody)
     readonly property real timeShadowOffset: Math.max(1, Math.round(cardScale * 0.012))
     readonly property var bodyLayout: root.layoutBodies(
-        root.sunBody,
-        root.moonBody,
+        root.renderedSunBody,
+        root.renderedMoonBody,
         root.sunBodyBaseDiameter,
         root.moonBodyBaseDiameter,
         phasePalette.allowBodyOverlap === true
@@ -351,6 +620,13 @@ Item {
         sourceComponent: root.clockComponentOverride || (root.isLocalTimeZone ? localClockComponent : configuredClockComponent)
     }
 
+    Loader {
+        id: weatherLoader
+
+        active: root.weatherStateOverride === null && (root.weatherComponentOverride !== null || root.hasWeatherCoordinates)
+        sourceComponent: root.weatherComponentOverride || liveWeatherSourceComponent
+    }
+
     Component {
         id: localClockComponent
 
@@ -365,6 +641,17 @@ Item {
         Clock {
             trackSeconds: false
             timeZone: root.timeZoneId
+        }
+    }
+
+    Component {
+        id: liveWeatherSourceComponent
+
+        WeatherSource {
+            latitude: Number(root.resolvedEntry.latitude)
+            longitude: Number(root.resolvedEntry.longitude)
+            timeZoneId: root.timeZoneId
+            refreshIntervalMs: Math.max(5, root.weatherRefreshIntervalMinutes) * 60 * 1000
         }
     }
 
@@ -399,6 +686,31 @@ Item {
         }
 
         Rectangle {
+            id: twilightSkyBand
+
+            objectName: "twilightSkyBandItem"
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            height: parent.height * 0.46
+            visible: root.isTwilightPhase && root.twilightBandOpacity > 0.02
+            gradient: Gradient {
+                GradientStop {
+                    position: 0
+                    color: root.withAlpha(root.twilightCoolColor, root.twilightBandOpacity * (0.46 + (root.twilightCoolness * 0.2)))
+                }
+                GradientStop {
+                    position: 0.42
+                    color: root.withAlpha(root.twilightWarmColor, root.twilightBandOpacity * (0.14 + (root.twilightWarmth * 0.08)))
+                }
+                GradientStop {
+                    position: 1
+                    color: Qt.rgba(1, 1, 1, 0)
+                }
+            }
+        }
+
+        Rectangle {
             width: frame.width * 1.12
             height: frame.height * (0.28 + (phasePalette.hazeOpacity * 0.34))
             radius: height / 2
@@ -421,6 +733,33 @@ Item {
             }
         }
 
+        Rectangle {
+            id: twilightHorizonBand
+
+            objectName: "twilightHorizonBandItem"
+            width: frame.width * 1.16
+            height: frame.height * (0.18 + (root.twilightHorizonBoost * 0.16))
+            radius: height / 2
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: -height * 0.18
+            visible: root.isTwilightPhase && root.twilightHorizonBoost > 0.02
+            gradient: Gradient {
+                GradientStop {
+                    position: 0
+                    color: root.withAlpha(root.twilightWarmColor, 0)
+                }
+                GradientStop {
+                    position: 0.44
+                    color: root.withAlpha(root.twilightWarmColor, (0.08 + (root.twilightWarmth * 0.1)) * (1 - (root.weatherHorizonFade * 0.42)))
+                }
+                GradientStop {
+                    position: 1
+                    color: root.withAlpha(root.twilightWarmColor, (0.14 + (root.twilightHorizonBoost * 0.16)) * (1 - (root.weatherHorizonFade * 0.36)))
+                }
+            }
+        }
+
         Repeater {
             model: root.starCount
 
@@ -436,7 +775,7 @@ Item {
                 height: width
                 x: horizontalUnit * (frame.width - width)
                 y: verticalUnit * (frame.height * 0.42)
-                opacity: phasePalette.starOpacity * twinkle
+                opacity: phasePalette.starOpacity * twinkle * root.weatherStarVisibilityFactor
 
                 Rectangle {
                     anchors.centerIn: parent
@@ -493,7 +832,7 @@ Item {
                 id: sunBodyItem
 
                 objectName: "sunBodyItem"
-                bodyData: root.sunBody
+                bodyData: root.renderedSunBody
                 moon: false
                 width: root.sunBodyDiameter
                 height: width
@@ -503,8 +842,13 @@ Item {
                 coreColor: root.sunCoreColor
                 rimColor: root.sunRimColor
                 shadowColor: root.moonShadowColor
-                glowOpacity: phasePalette.glowOpacity
+                glowOpacity: phasePalette.glowOpacity * (root.weatherSunGlowFactor + (root.weatherHumidityBloom * 0.22))
                 rimOpacity: root.isNightPhase ? 0.34 : 0.26
+                atmosphereTintColor: root.orbAtmosphereTintColor
+                atmosphericVeilOpacity: root.weatherAtmosphereStrength * 0.34
+                surfaceFlattening: root.orbSurfaceFlattening
+                rimSoftening: root.orbRimSoftening
+                opacity: root.weatherOrbOpacity
                 z: 1
             }
 
@@ -512,7 +856,7 @@ Item {
                 id: moonBodyItem
 
                 objectName: "moonBodyItem"
-                bodyData: root.moonBody
+                bodyData: root.renderedMoonBody
                 moon: true
                 width: root.moonBodyDiameter
                 height: width
@@ -522,10 +866,181 @@ Item {
                 coreColor: root.moonCoreColor
                 rimColor: root.moonRimColor
                 shadowColor: root.moonShadowColor
-                glowOpacity: root.isNightPhase ? Math.max(phasePalette.glowOpacity, 0.12) : (phasePalette.glowOpacity * 0.72)
+                glowOpacity: (root.isNightPhase ? Math.max(phasePalette.glowOpacity, 0.12) : (phasePalette.glowOpacity * 0.72))
+                    * (root.weatherMoonGlowFactor + (root.weatherHumidityBloom * 0.12))
                 rimOpacity: root.isNightPhase ? 0.38 : 0.28
+                atmosphereTintColor: root.orbAtmosphereTintColor
+                atmosphericVeilOpacity: root.weatherAtmosphereStrength * 0.42
+                surfaceFlattening: root.orbSurfaceFlattening * 0.9
+                rimSoftening: root.orbRimSoftening
+                opacity: root.weatherOrbOpacity
                 pulse: false
                 z: 2
+            }
+        }
+
+        WeatherOverlay {
+            anchors.fill: parent
+            visible: root.weatherVisualTransitionActive
+            opacity: root.weatherVisualTransitionActive ? Math.max(0, 1 - root.weatherVisualTransitionProgress) : 0
+            sceneState: root.weatherVisualFromScene
+            zoneSeed: root.zoneSeed
+            cardScale: root.cardScale
+            sunRect: ({
+                "visible": root.renderedSunBody.visible,
+                "x": orbLane.x + sunBodyItem.x,
+                "y": orbLane.y + sunBodyItem.y,
+                "width": sunBodyItem.width,
+                "height": sunBodyItem.height
+            })
+            moonRect: ({
+                "visible": root.renderedMoonBody.visible,
+                "x": orbLane.x + moonBodyItem.x,
+                "y": orbLane.y + moonBodyItem.y,
+                "width": moonBodyItem.width,
+                "height": moonBodyItem.height
+            })
+            cloudHighlightColor: root.weatherCloudHighlightColor
+            cloudShadowColor: root.weatherCloudShadowColor
+            orbLightColor: root.orbLightColor
+            orbLightAccentColor: root.orbLightAccentColor
+            twilightWarmColor: root.twilightWarmColor
+            twilightCoolColor: root.twilightCoolColor
+            twilightWarmth: root.twilightWarmth
+            twilightCoolness: root.twilightCoolness
+            twilightActive: root.isTwilightPhase
+            cinematicWeather: root.cinematicWeather
+            reducedMotion: root.reducedMotion
+            weatherIntensity: root.weatherIntensityFactor
+            summerStrength: root.seasonalSummerStrength
+            cloudColor: root.weatherCloudColor
+            precipitationColor: root.weatherPrecipitationColor
+            snowColor: root.primaryTextColor
+            fogColor: root.weatherFogColor
+        }
+
+        WeatherOverlay {
+            anchors.fill: parent
+            opacity: root.weatherVisualTransitionActive ? Math.min(1, root.weatherVisualTransitionProgress) : 1
+            sceneState: root.weatherVisualToScene
+            zoneSeed: root.zoneSeed
+            cardScale: root.cardScale
+            sunRect: ({
+                "visible": root.renderedSunBody.visible,
+                "x": orbLane.x + sunBodyItem.x,
+                "y": orbLane.y + sunBodyItem.y,
+                "width": sunBodyItem.width,
+                "height": sunBodyItem.height
+            })
+            moonRect: ({
+                "visible": root.renderedMoonBody.visible,
+                "x": orbLane.x + moonBodyItem.x,
+                "y": orbLane.y + moonBodyItem.y,
+                "width": moonBodyItem.width,
+                "height": moonBodyItem.height
+            })
+            cloudHighlightColor: root.weatherCloudHighlightColor
+            cloudShadowColor: root.weatherCloudShadowColor
+            orbLightColor: root.orbLightColor
+            orbLightAccentColor: root.orbLightAccentColor
+            twilightWarmColor: root.twilightWarmColor
+            twilightCoolColor: root.twilightCoolColor
+            twilightWarmth: root.twilightWarmth
+            twilightCoolness: root.twilightCoolness
+            twilightActive: root.isTwilightPhase
+            cinematicWeather: root.cinematicWeather
+            reducedMotion: root.reducedMotion
+            weatherIntensity: root.weatherIntensityFactor
+            summerStrength: root.seasonalSummerStrength
+            cloudColor: root.weatherCloudColor
+            precipitationColor: root.weatherPrecipitationColor
+            snowColor: root.primaryTextColor
+            fogColor: root.weatherFogColor
+        }
+
+        Item {
+            id: weatherHud
+
+            objectName: "weatherHudItem"
+            visible: root.showWeatherStatusCluster
+            z: 6
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.topMargin: Math.max(6, Math.round(root.contentInset * 0.72))
+            anchors.rightMargin: Math.max(6, Math.round(root.contentInset * 0.72))
+            width: weatherHudRow.implicitWidth
+            height: weatherHudRow.implicitHeight
+
+            Row {
+                id: weatherHudRow
+
+                spacing: Math.max(3, Math.round(root.cardScale * 0.016))
+
+                Item {
+                    visible: root.weatherConditionGlyph.length > 0
+                    width: weatherConditionGlyphForeground.implicitWidth
+                    height: weatherConditionGlyphForeground.implicitHeight
+
+                    Text {
+                        id: weatherConditionGlyphShadow
+
+                        anchors.fill: parent
+                        anchors.leftMargin: 1
+                        anchors.topMargin: 1
+                        color: root.timeShadowColor
+                        text: root.weatherConditionGlyph
+                        font.family: Kirigami.Theme.defaultFont.family
+                        font.pixelSize: root.weatherGlyphFontSize
+                        renderType: Text.QtRendering
+                    }
+
+                    Text {
+                        id: weatherConditionGlyphForeground
+
+                        objectName: "weatherConditionGlyphTextItem"
+                        anchors.fill: parent
+                        color: root.primaryTextColor
+                        text: root.weatherConditionGlyph
+                        font.family: Kirigami.Theme.defaultFont.family
+                        font.pixelSize: root.weatherGlyphFontSize
+                        renderType: Text.QtRendering
+                    }
+                }
+
+                Item {
+                    visible: root.hasMaxFeelsLikeTemperature
+                    width: maxFeelsLikeForeground.implicitWidth
+                    height: maxFeelsLikeForeground.implicitHeight
+
+                    Text {
+                        id: maxFeelsLikeShadow
+
+                        anchors.fill: parent
+                        anchors.leftMargin: 1
+                        anchors.topMargin: 1
+                        color: root.timeShadowColor
+                        text: root.maxFeelsLikeTemperatureText
+                        font.family: Kirigami.Theme.defaultFont.family
+                        font.bold: true
+                        font.weight: Font.DemiBold
+                        font.pixelSize: root.weatherMetricFontSize
+                        renderType: Text.NativeRendering
+                    }
+
+                    Text {
+                        id: maxFeelsLikeForeground
+
+                        objectName: "maxFeelsLikeTextItem"
+                        anchors.fill: parent
+                        color: root.primaryTextColor
+                        text: root.maxFeelsLikeTemperatureText
+                        font.family: Kirigami.Theme.defaultFont.family
+                        font.bold: true
+                        font.weight: Font.DemiBold
+                        font.pixelSize: root.weatherMetricFontSize
+                        renderType: Text.NativeRendering
+                    }
+                }
             }
         }
 

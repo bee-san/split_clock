@@ -22,6 +22,17 @@ function hexColor(value) {
     return Qt.rgba(red, green, blue, 1);
 }
 
+function blendColors(baseColor, tintColor, amount) {
+    const mix = clamp(amount, 0, 1);
+
+    return Qt.rgba(
+        (baseColor.r * (1 - mix)) + (tintColor.r * mix),
+        (baseColor.g * (1 - mix)) + (tintColor.g * mix),
+        (baseColor.b * (1 - mix)) + (tintColor.b * mix),
+        (baseColor.a * (1 - mix)) + (tintColor.a * mix)
+    );
+}
+
 function parseOffsetHours(offsetText) {
     const text = String(offsetText || "");
     const match = text.match(/([+-])(\d{1,2})(?::?(\d{2}))?/);
@@ -400,20 +411,54 @@ function emptyBody() {
     };
 }
 
-function phaseFromState(state) {
-    if (state.altitude < -14) {
+function seasonalContextFor(dateTime, latitude) {
+    const parts = extractParts(dateTime);
+    const safeLatitude = latitude === null || latitude === undefined ? 0 : Number(latitude);
+    const absoluteLatitude = clamp(Math.abs(safeLatitude), 0, 80);
+    const latitudeFactor = clamp((absoluteLatitude - 18) / 50, 0, 1);
+    const hemisphere = safeLatitude < 0 ? -1 : 1;
+    const seasonalAngle = ((dayOfYear(parts.year, parts.month, parts.day) - 172) / 365.2422) * Math.PI * 2;
+    const summerBias = Math.cos(seasonalAngle) * hemisphere;
+    const summerStrength = clamp(Math.max(0, summerBias) * latitudeFactor, 0, 1);
+    const winterStrength = clamp(Math.max(0, -summerBias) * latitudeFactor, 0, 1);
+    const twilightExtension = latitudeFactor * (0.7 + (summerStrength * 1.5));
+
+    return {
+        latitudeFactor: latitudeFactor,
+        summerStrength: summerStrength,
+        winterStrength: winterStrength,
+        twilightExtension: twilightExtension
+    };
+}
+
+function phaseThresholdsForContext(seasonalContext) {
+    const context = seasonalContext || seasonalContextFor(extractParts(new Date()), 0);
+    const extension = context.twilightExtension || 0;
+
+    return {
+        midnightThreshold: -14 - (extension * 0.9),
+        nightThreshold: -6 - (extension * 0.55),
+        dawnThreshold: -2 - (extension * 0.18),
+        sunriseThreshold: 6 + (extension * 0.42)
+    };
+}
+
+function phaseFromState(state, latitude, seasonalContext) {
+    const thresholds = phaseThresholdsForContext(seasonalContext || seasonalContextFor(new Date(), latitude));
+
+    if (state.altitude < thresholds.midnightThreshold) {
         return "midnight";
     }
 
-    if (state.altitude < -6) {
+    if (state.altitude < thresholds.nightThreshold) {
         return "night";
     }
 
-    if (state.altitude < -2) {
+    if (state.altitude < thresholds.dawnThreshold) {
         return state.hourAngle < 0 ? "dawn" : "dusk";
     }
 
-    if (state.altitude < 6) {
+    if (state.altitude < thresholds.sunriseThreshold) {
         return state.hourAngle < 0 ? "sunrise" : "sunset";
     }
 
@@ -502,7 +547,11 @@ function paletteByPhase(phase) {
             contrastBoost: 0.68,
             textBoost: 0.68,
             vignetteOpacity: 0.18,
-            glowOpacity: 0.24
+            glowOpacity: 0.24,
+            twilightWarmth: 0.38,
+            twilightCoolness: 0.78,
+            twilightBandOpacity: 0.16,
+            twilightHorizonBoost: 0.28
         };
     case "sunrise":
         return {
@@ -526,7 +575,11 @@ function paletteByPhase(phase) {
             contrastBoost: 0.28,
             textBoost: 0.26,
             vignetteOpacity: 0.12,
-            glowOpacity: 0.3
+            glowOpacity: 0.3,
+            twilightWarmth: 0.86,
+            twilightCoolness: 0.34,
+            twilightBandOpacity: 0.22,
+            twilightHorizonBoost: 0.48
         };
     case "day":
         return {
@@ -550,7 +603,11 @@ function paletteByPhase(phase) {
             contrastBoost: 0.12,
             textBoost: 0.08,
             vignetteOpacity: 0.08,
-            glowOpacity: 0.22
+            glowOpacity: 0.22,
+            twilightWarmth: 0,
+            twilightCoolness: 0,
+            twilightBandOpacity: 0,
+            twilightHorizonBoost: 0
         };
     case "sunset":
         return {
@@ -574,7 +631,11 @@ function paletteByPhase(phase) {
             contrastBoost: 0.4,
             textBoost: 0.38,
             vignetteOpacity: 0.14,
-            glowOpacity: 0.28
+            glowOpacity: 0.28,
+            twilightWarmth: 0.92,
+            twilightCoolness: 0.42,
+            twilightBandOpacity: 0.24,
+            twilightHorizonBoost: 0.52
         };
     case "dusk":
         return {
@@ -598,7 +659,11 @@ function paletteByPhase(phase) {
             contrastBoost: 0.74,
             textBoost: 0.74,
             vignetteOpacity: 0.18,
-            glowOpacity: 0.2
+            glowOpacity: 0.2,
+            twilightWarmth: 0.34,
+            twilightCoolness: 0.82,
+            twilightBandOpacity: 0.18,
+            twilightHorizonBoost: 0.24
         };
     case "midnight":
         return {
@@ -622,7 +687,11 @@ function paletteByPhase(phase) {
             contrastBoost: 0.96,
             textBoost: 0.96,
             vignetteOpacity: 0.28,
-            glowOpacity: 0.09
+            glowOpacity: 0.09,
+            twilightWarmth: 0,
+            twilightCoolness: 0,
+            twilightBandOpacity: 0,
+            twilightHorizonBoost: 0
         };
     case "night":
     default:
@@ -647,8 +716,109 @@ function paletteByPhase(phase) {
             contrastBoost: 0.9,
             textBoost: 0.88,
             vignetteOpacity: 0.22,
-            glowOpacity: 0.12
+            glowOpacity: 0.12,
+            twilightWarmth: 0,
+            twilightCoolness: 0,
+            twilightBandOpacity: 0,
+            twilightHorizonBoost: 0
         };
+    }
+}
+
+function applySeasonalAdjustments(basePalette, seasonalContext, phase) {
+    const context = seasonalContext || seasonalContextFor(new Date(), 0);
+    const summerWarmth = context.summerStrength * (phase === "day" ? 0.24 : 0.14);
+    const winterCoolness = context.winterStrength * (phase === "day" ? 0.32 : 0.16);
+    const highLatitudeFactor = context.latitudeFactor || 0;
+
+    return {
+        phase: basePalette.phase,
+        phaseLabel: basePalette.phaseLabel,
+        accent: blendColors(blendColors(basePalette.accent, hexColor("#6ca6f0"), summerWarmth * 0.4), hexColor("#5f8fd7"), winterCoolness * 0.26),
+        skyTop: blendColors(blendColors(basePalette.skyTop, hexColor("#3b8be0"), summerWarmth * 0.18), hexColor("#2a6ed8"), winterCoolness * 0.3),
+        skyMid: blendColors(blendColors(basePalette.skyMid, hexColor("#8fc3ff"), summerWarmth * 0.12), hexColor("#99b7e8"), winterCoolness * 0.28),
+        skyBottom: blendColors(blendColors(basePalette.skyBottom, hexColor("#fff0cd"), summerWarmth * 0.1), hexColor("#edf5ff"), winterCoolness * 0.24),
+        horizon: blendColors(basePalette.horizon, hexColor("#ffe3bf"), summerWarmth * 0.16),
+        horizonGlow: blendColors(blendColors(basePalette.horizonGlow, hexColor("#ffd4a0"), summerWarmth * 0.18), hexColor("#dfeeff"), winterCoolness * 0.1),
+        glow: blendColors(blendColors(basePalette.glow, hexColor("#fff0c5"), summerWarmth * 0.14), hexColor("#edf5ff"), winterCoolness * 0.14),
+        orbCore: blendColors(basePalette.orbCore, hexColor("#eef5ff"), winterCoolness * 0.16),
+        orbHalo: blendColors(blendColors(basePalette.orbHalo, hexColor("#ffcf86"), summerWarmth * 0.16), hexColor("#b9d0ef"), winterCoolness * 0.18),
+        orbRim: blendColors(basePalette.orbRim, hexColor("#eef5ff"), winterCoolness * 0.12),
+        orbScale: basePalette.orbScale,
+        starOpacity: clamp(basePalette.starOpacity + (highLatitudeFactor * 0.04) - (summerWarmth * 0.03), 0, 1),
+        starDensity: clamp(basePalette.starDensity + (highLatitudeFactor * 0.06) - (summerWarmth * 0.04), 0, 1),
+        hazeOpacity: clamp(basePalette.hazeOpacity + (summerWarmth * 0.04) + (winterCoolness * 0.02), 0, 1),
+        sheenOpacity: clamp(basePalette.sheenOpacity + (summerWarmth * 0.04), 0, 1),
+        contrastBoost: clamp(basePalette.contrastBoost + (summerWarmth * 0.1) + (winterCoolness * 0.04), 0, 1),
+        textBoost: clamp(basePalette.textBoost + (winterCoolness * 0.06), 0, 1),
+        vignetteOpacity: clamp(basePalette.vignetteOpacity + (winterCoolness * 0.04), 0, 1),
+        glowOpacity: clamp(basePalette.glowOpacity + (summerWarmth * 0.06) - (winterCoolness * 0.03), 0, 1),
+        twilightWarmth: clamp(basePalette.twilightWarmth + (summerWarmth * 0.08), 0, 1),
+        twilightCoolness: clamp(basePalette.twilightCoolness + (winterCoolness * 0.08) + (highLatitudeFactor * 0.04), 0, 1),
+        twilightBandOpacity: clamp(basePalette.twilightBandOpacity + (context.twilightExtension * 0.04), 0, 1),
+        twilightHorizonBoost: clamp(basePalette.twilightHorizonBoost + (context.twilightExtension * 0.06), 0, 1)
+    };
+}
+
+function twilightProfileForPhase(phase, solarPosition, seasonalContext) {
+    if (phase !== "dawn" && phase !== "sunrise" && phase !== "sunset" && phase !== "dusk") {
+        return {
+            twilightWarmth: 0,
+            twilightCoolness: 0,
+            twilightBandOpacity: 0,
+            twilightHorizonBoost: 0
+        };
+    }
+
+    if (!solarPosition) {
+        return paletteByPhase(phase);
+    }
+
+    const context = seasonalContext || seasonalContextFor(new Date(), 0);
+    const altitude = solarPosition.altitude;
+
+    switch (phase) {
+    case "dawn": {
+        const progress = clamp((altitude + 6) / 4, 0, 1);
+
+        return {
+            twilightWarmth: clamp(0.3 + (progress * 0.16) + (context.summerStrength * 0.06), 0, 1),
+            twilightCoolness: clamp(0.82 - (progress * 0.1) + (context.winterStrength * 0.08) + (context.latitudeFactor * 0.04), 0, 1),
+            twilightBandOpacity: clamp(0.14 + (progress * 0.06) + (context.twilightExtension * 0.03), 0, 1),
+            twilightHorizonBoost: clamp(0.24 + (progress * 0.1) + (context.twilightExtension * 0.05), 0, 1)
+        };
+    }
+    case "sunrise": {
+        const progress = clamp((altitude + 2) / 8, 0, 1);
+
+        return {
+            twilightWarmth: clamp(0.9 - (progress * 0.2) + (context.summerStrength * 0.08), 0, 1),
+            twilightCoolness: clamp(0.42 - (progress * 0.18) + (context.winterStrength * 0.06), 0, 1),
+            twilightBandOpacity: clamp(0.24 - (progress * 0.1) + (context.twilightExtension * 0.03), 0, 1),
+            twilightHorizonBoost: clamp(0.5 - (progress * 0.14) + (context.twilightExtension * 0.04), 0, 1)
+        };
+    }
+    case "sunset": {
+        const progress = clamp((6 - altitude) / 8, 0, 1);
+
+        return {
+            twilightWarmth: clamp(0.74 + (progress * 0.18) + (context.summerStrength * 0.08), 0, 1),
+            twilightCoolness: clamp(0.28 + (progress * 0.24) + (context.winterStrength * 0.06), 0, 1),
+            twilightBandOpacity: clamp(0.18 + (progress * 0.1) + (context.twilightExtension * 0.03), 0, 1),
+            twilightHorizonBoost: clamp(0.34 + (progress * 0.18) + (context.twilightExtension * 0.04), 0, 1)
+        };
+    }
+    case "dusk":
+    default: {
+        const progress = clamp((-2 - altitude) / 4, 0, 1);
+
+        return {
+            twilightWarmth: clamp(0.44 - (progress * 0.12) + (context.summerStrength * 0.04), 0, 1),
+            twilightCoolness: clamp(0.64 + (progress * 0.18) + (context.winterStrength * 0.08) + (context.latitudeFactor * 0.04), 0, 1),
+            twilightBandOpacity: clamp(0.16 + (progress * 0.06) + (context.twilightExtension * 0.03), 0, 1),
+            twilightHorizonBoost: clamp(0.28 - (progress * 0.08) + (context.twilightExtension * 0.03), 0, 1)
+        };
+    }
     }
 }
 
@@ -721,7 +891,9 @@ function remoteCelestialState(dateTime, latitude, longitude, offsetText, basePal
     };
 }
 
-function decoratePalette(basePalette, celestialState) {
+function decoratePalette(basePalette, celestialState, twilightProfile, seasonalContext) {
+    const context = seasonalContext || seasonalContextFor(new Date(), 0);
+
     return {
         phase: basePalette.phase,
         phaseLabel: basePalette.phaseLabel,
@@ -744,6 +916,13 @@ function decoratePalette(basePalette, celestialState) {
         textBoost: basePalette.textBoost,
         vignetteOpacity: basePalette.vignetteOpacity,
         glowOpacity: basePalette.glowOpacity,
+        twilightWarmth: twilightProfile.twilightWarmth,
+        twilightCoolness: twilightProfile.twilightCoolness,
+        twilightBandOpacity: twilightProfile.twilightBandOpacity,
+        twilightHorizonBoost: twilightProfile.twilightHorizonBoost,
+        summerStrength: context.summerStrength,
+        winterStrength: context.winterStrength,
+        latitudeFactor: context.latitudeFactor,
         usesSimplifiedCelestial: celestialState.usesSimplifiedCelestial,
         orbX: celestialState.orbX,
         orbY: celestialState.orbY,
@@ -756,11 +935,13 @@ function decoratePalette(basePalette, celestialState) {
 
 function paletteFor(dateTime, latitude, longitude, offsetText) {
     const solarPosition = solarState(dateTime, latitude, longitude, offsetText);
-    const phase = solarPosition ? phaseFromState(solarPosition) : fallbackPhase(dateTime);
-    const basePalette = paletteByPhase(phase);
+    const seasonalContext = seasonalContextFor(dateTime, latitude);
+    const phase = solarPosition ? phaseFromState(solarPosition, latitude, seasonalContext) : fallbackPhase(dateTime);
+    const basePalette = applySeasonalAdjustments(paletteByPhase(phase), seasonalContext, phase);
+    const twilightProfile = twilightProfileForPhase(phase, solarPosition, seasonalContext);
     const celestialState = solarPosition
         ? remoteCelestialState(dateTime, latitude, longitude, offsetText, basePalette)
         : simplifiedCelestialState(dateTime, basePalette, phase);
 
-    return decoratePalette(basePalette, celestialState);
+    return decoratePalette(basePalette, celestialState, twilightProfile, seasonalContext);
 }

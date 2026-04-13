@@ -48,6 +48,73 @@ TestCase {
         verify(palette.moonBody.sizeScale < palette.sunBody.sizeScale);
     }
 
+    function test_sunStaysLowAtHorizonNearRiseAndSet() {
+        const sunrise = SolarPalette.paletteFor(parts(2026, 4, 8, 5, 30, 0), 35.654444, 139.744722, "+09:00");
+        const midday = SolarPalette.paletteFor(parts(2026, 4, 8, 12, 0, 0), 35.654444, 139.744722, "+09:00");
+        const sunset = SolarPalette.paletteFor(parts(2026, 4, 8, 17, 50, 0), 35.654444, 139.744722, "+09:00");
+
+        verify(sunrise.sunBody.visible);
+        verify(midday.sunBody.visible);
+        verify(sunset.sunBody.visible);
+        verify(sunrise.sunBody.y > midday.sunBody.y);
+        verify(sunset.sunBody.y > midday.sunBody.y);
+        verify(sunrise.sunBody.x < midday.sunBody.x);
+        verify(sunset.sunBody.x > midday.sunBody.x);
+    }
+
+    function test_winterDaylightRunsCoolerThanSummerAtHighLatitude() {
+        const winter = SolarPalette.paletteFor(parts(2026, 1, 15, 12, 0, 0), 59.3293, 18.0686, "+01:00");
+        const summer = SolarPalette.paletteFor(parts(2026, 7, 15, 12, 0, 0), 59.3293, 18.0686, "+02:00");
+
+        compare(winter.phase, "day");
+        compare(summer.phase, "day");
+        verify((winter.skyTop.b - winter.skyTop.r) > (summer.skyTop.b - summer.skyTop.r));
+        verify(summer.contrastBoost > winter.contrastBoost);
+    }
+
+    function test_highLatitudeSummerExtendsTwilightBand() {
+        const lowLatitudeContext = SolarPalette.seasonalContextFor(parts(2026, 6, 21, 4, 0, 0), 35);
+        const highLatitudeContext = SolarPalette.seasonalContextFor(parts(2026, 6, 21, 4, 0, 0), 64);
+        const lowLatitudePhase = SolarPalette.phaseFromState({
+            "altitude": 6.4,
+            "hourAngle": -18
+        }, 35, lowLatitudeContext);
+        const highLatitudePhase = SolarPalette.phaseFromState({
+            "altitude": 6.4,
+            "hourAngle": -18
+        }, 64, highLatitudeContext);
+
+        compare(lowLatitudePhase, "day");
+        compare(highLatitudePhase, "sunrise");
+        verify(highLatitudeContext.twilightExtension > lowLatitudeContext.twilightExtension);
+    }
+
+    function test_sunriseTwilightProfileStaysWarmerThanDawn() {
+        const dawn = SolarPalette.twilightProfileForPhase("dawn", {
+            "altitude": -4
+        });
+        const sunrise = SolarPalette.twilightProfileForPhase("sunrise", {
+            "altitude": 0
+        });
+
+        verify(sunrise.twilightWarmth > dawn.twilightWarmth);
+        verify(dawn.twilightCoolness > sunrise.twilightCoolness);
+        verify(sunrise.twilightHorizonBoost > dawn.twilightHorizonBoost);
+    }
+
+    function test_duskGetsCoolerAsSunDrops() {
+        const earlyDusk = SolarPalette.twilightProfileForPhase("dusk", {
+            "altitude": -2.2
+        });
+        const lateDusk = SolarPalette.twilightProfileForPhase("dusk", {
+            "altitude": -5.4
+        });
+
+        verify(lateDusk.twilightCoolness > earlyDusk.twilightCoolness);
+        verify(lateDusk.twilightWarmth < earlyDusk.twilightWarmth);
+        verify(lateDusk.twilightBandOpacity > earlyDusk.twilightBandOpacity);
+    }
+
     function test_nightWithMoonBelowHorizon_remotePhoenix() {
         const palette = SolarPalette.paletteFor(parts(2026, 4, 3, 20, 0, 0), 33.4484, -112.074, "-07:00");
 

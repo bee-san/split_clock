@@ -8,4 +8,10 @@ ConfigModel {
         icon: "preferences-desktop-locale"
         source: "configTimeZones.qml"
     }
+
+    ConfigCategory {
+        name: i18n("Weather")
+        icon: "weather-overcast"
+        source: "configWeather.qml"
+    }
 }

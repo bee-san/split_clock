@@ -23,16 +23,24 @@ TestCase {
         };
     }
 
-    function createCard(zoneId, entry, state, offset, width, height) {
+    function createCard(zoneId, entry, state, offset, width, height, weatherState) {
         clockParts = state;
         clockOffset = offset;
 
-        const card = createTemporaryObject(timeCardComponent, testCase, {
+        const properties = {
             "timeZoneId": zoneId,
             "entry": entry,
             "width": width || 220,
             "height": height || 120
-        });
+        };
+
+        if (weatherState !== undefined) {
+            properties.weatherStateOverride = weatherState;
+        } else if (zoneId !== "Local") {
+            properties.weatherStateOverride = clearWeatherState();
+        }
+
+        const card = createTemporaryObject(timeCardComponent, testCase, properties);
 
         verify(card !== null);
         wait(0);
@@ -70,6 +78,87 @@ TestCase {
         const dy = secondCenterY - firstCenterY;
 
         return Math.sqrt((dx * dx) + (dy * dy));
+    }
+
+    function colorDistance(firstColor, secondColor) {
+        return Math.abs(firstColor.r - secondColor.r)
+            + Math.abs(firstColor.g - secondColor.g)
+            + Math.abs(firstColor.b - secondColor.b);
+    }
+
+    function clearWeatherState() {
+        return {
+            "available": true,
+            "status": "ready",
+            "kind": "clear",
+            "cloudOpacity": 0.04,
+            "starVisibilityFactor": 1,
+            "sunGlowFactor": 1,
+            "moonGlowFactor": 1
+        };
+    }
+
+    function rainWeatherState() {
+        return {
+            "available": true,
+            "status": "ready",
+            "kind": "rain",
+            "cloudOpacity": 0.82,
+            "rainDensity": 0.78,
+            "starVisibilityFactor": 0,
+            "sunGlowFactor": 0.44,
+            "moonGlowFactor": 0.64,
+            "skyDimming": 0.22,
+            "contrastSoftening": 0.12
+        };
+    }
+
+    function snowWeatherState() {
+        return {
+            "available": true,
+            "status": "ready",
+            "kind": "snow",
+            "cloudOpacity": 0.74,
+            "snowDensity": 0.72,
+            "coolTint": 0.52,
+            "starVisibilityFactor": 0.12,
+            "sunGlowFactor": 0.58,
+            "moonGlowFactor": 0.74,
+            "skyDimming": 0.14,
+            "contrastSoftening": 0.16
+        };
+    }
+
+    function cloudyWeatherState() {
+        return {
+            "available": true,
+            "status": "ready",
+            "kind": "cloudy",
+            "cloudOpacity": 0.64,
+            "cloudBandCount": 4,
+            "cloudBreakFactor": 0.32,
+            "sunGlowFactor": 0.56,
+            "moonGlowFactor": 0.66,
+            "skyDimming": 0.16,
+            "contrastSoftening": 0.1
+        };
+    }
+
+    function stormWeatherState() {
+        return {
+            "available": true,
+            "status": "ready",
+            "kind": "thunderstorm",
+            "cloudOpacity": 0.9,
+            "rainDensity": 0.84,
+            "storminess": 0.88,
+            "lightning": true,
+            "starVisibilityFactor": 0,
+            "sunGlowFactor": 0.3,
+            "moonGlowFactor": 0.48,
+            "skyDimming": 0.3,
+            "contrastSoftening": 0.14
+        };
     }
 
     Component {
@@ -205,5 +294,170 @@ TestCase {
         verify(moon.x >= 0 && moon.y >= 0);
         verify(moon.x + moon.width <= lane.width + 0.5);
         verify(moon.y + moon.height <= lane.height + 0.5);
+    }
+
+    function test_rainOverlaySuppressesStarsAtNight() {
+        const card = createCard(
+            "Asia/Tokyo",
+            {
+                "city": "Tokyo",
+                "label": "Tokyo",
+                "latitude": 35.654444,
+                "longitude": 139.744722
+            },
+            parts(2026, 4, 1, 0, 0, 0),
+            "+09:00",
+            220,
+            120,
+            rainWeatherState()
+        );
+        const overlay = findObject(card, "weatherOverlayItem");
+        const rainLayer = findObject(card, "rainLayerItem");
+
+        verify(overlay !== null);
+        verify(rainLayer !== null);
+        verify(overlay.visible);
+        verify(rainLayer.visible);
+        compare(card.starCount, 0);
+        verify(card.weatherScene.kind === "rain");
+    }
+
+    function test_snowOverlayCoolsSkyWithoutLosingTextContrast() {
+        const card = createCard(
+            "Asia/Tokyo",
+            {
+                "city": "Tokyo",
+                "label": "Tokyo",
+                "latitude": 35.654444,
+                "longitude": 139.744722
+            },
+            parts(2026, 4, 8, 7, 0, 0),
+            "+09:00",
+            220,
+            120,
+            snowWeatherState()
+        );
+        const snowLayer = findObject(card, "snowLayerItem");
+
+        verify(snowLayer !== null);
+        verify(snowLayer.visible);
+        verify(card.skyTopColor.b > card.skyTopColor.r);
+        verify(colorDistance(card.primaryTextColor, card.skyTopColor) > 0.35);
+    }
+
+    function test_cloudyDaySuppressesSecondaryDayOrb() {
+        const card = createCard(
+            "Asia/Tokyo",
+            {
+                "city": "Tokyo",
+                "label": "Tokyo",
+                "latitude": 35.654444,
+                "longitude": 139.744722
+            },
+            parts(2026, 4, 8, 7, 0, 0),
+            "+09:00",
+            220,
+            120,
+            cloudyWeatherState()
+        );
+        const sun = findObject(card, "sunBodyItem");
+        const moon = findObject(card, "moonBodyItem");
+
+        verify(card.phasePalette.sunBody.visible);
+        verify(card.phasePalette.moonBody.visible);
+        compare(card.suppressSecondaryDayOrb, true);
+        compare(card.renderedMoonBody.visible, false);
+        compare(sun.visible, true);
+        compare(moon.visible, false);
+    }
+
+    function test_thunderstormOverlayDoesNotShiftLayout() {
+        const card = createCard(
+            "Asia/Tokyo",
+            {
+                "city": "Tokyo",
+                "label": "Tokyo",
+                "latitude": 35.654444,
+                "longitude": 139.744722
+            },
+            parts(2026, 4, 8, 7, 0, 0),
+            "+09:00",
+            220,
+            120,
+            clearWeatherState()
+        );
+        const lane = findObject(card, "orbLaneItem");
+        const textColumn = findObject(card, "textColumnItem");
+        const previousLaneX = lane.x;
+        const previousTextX = textColumn.x;
+
+        card.weatherStateOverride = stormWeatherState();
+        wait(0);
+
+        const lightningLayer = findObject(card, "lightningLayerItem");
+
+        verify(lightningLayer !== null);
+        verify(lightningLayer.visible);
+        compare(lane.x, previousLaneX);
+        compare(textColumn.x, previousTextX);
+    }
+
+    function test_weatherHudShowsMaxFeelsLikeWithoutSolarMarker() {
+        const card = createCard(
+            "Asia/Tokyo",
+            {
+                "city": "Tokyo",
+                "label": "Tokyo",
+                "latitude": 35.654444,
+                "longitude": 139.744722
+            },
+            parts(2026, 4, 8, 14, 0, 0),
+            "+09:00",
+            220,
+            120,
+            {
+                "available": true,
+                "status": "ready",
+                "kind": "rain",
+                "cloudOpacity": 0.78,
+                "rainDensity": 0.62,
+                "maxFeelsLikeTemperatureCelsius": 29.4
+            }
+        );
+        const weatherHud = findObject(card, "weatherHudItem");
+        const maxFeelsLikeText = findObject(card, "maxFeelsLikeTextItem");
+        const glyphText = findObject(card, "weatherConditionGlyphTextItem");
+        const solarMarker = findObject(card, "solarMarkerTextItem");
+
+        verify(weatherHud !== null);
+        verify(maxFeelsLikeText !== null);
+        verify(glyphText !== null);
+        verify(solarMarker === null);
+        compare(maxFeelsLikeText.text, "29C");
+        compare(glyphText.text, "☂");
+        verify(colorDistance(maxFeelsLikeText.color, card.primaryTextColor) < 0.001);
+        verify(colorDistance(glyphText.color, card.primaryTextColor) < 0.001);
+    }
+
+    function test_missingWeatherCoordinatesStayAstronomyOnly() {
+        const card = createCard(
+            "Local",
+            {
+                "city": "Local",
+                "label": "Local",
+                "latitude": null,
+                "longitude": null
+            },
+            parts(2026, 4, 12, 22, 0, 0),
+            "",
+            220,
+            120
+        );
+        const overlay = findObject(card, "weatherOverlayItem");
+
+        compare(card.hasWeatherCoordinates, false);
+        compare(card.weatherScene.available, false);
+        verify(overlay !== null);
+        compare(overlay.visible, false);
     }
 }

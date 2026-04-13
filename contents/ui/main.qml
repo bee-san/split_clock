@@ -19,6 +19,11 @@ PlasmoidItem {
     readonly property int rowCount: gridMetrics.rows
     readonly property real cardWidth: gridMetrics.cardWidth
     readonly property real cardHeight: gridMetrics.cardHeight
+    readonly property bool cinematicWeather: Plasmoid.configuration.cinematicWeather !== false
+    readonly property bool hideDaytimeMoon: Plasmoid.configuration.hideDaytimeMoon === true
+    readonly property bool reducedMotion: Plasmoid.configuration.reducedMotion === true
+    readonly property real weatherIntensity: Math.max(0.4, Number(Plasmoid.configuration.weatherIntensity || 100) / 100)
+    readonly property int weatherRefreshIntervalMinutes: Math.max(5, Number(Plasmoid.configuration.weatherRefreshIntervalMinutes || 15))
 
     function calculateGridMetrics(count, availableWidth, availableHeight) {
         const safeCount = Math.max(1, count);
@@ -106,6 +111,11 @@ PlasmoidItem {
                 height: root.cardHeight
                 timeZoneId: zoneId
                 entry: TimeZoneCatalog.entryFor(zoneId, "")
+                cinematicWeather: root.cinematicWeather
+                hideDaytimeMoon: root.hideDaytimeMoon
+                reducedMotion: root.reducedMotion
+                weatherIntensity: root.weatherIntensity
+                weatherRefreshIntervalMinutes: root.weatherRefreshIntervalMinutes
             }
         }
     }
