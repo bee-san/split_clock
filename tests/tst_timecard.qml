@@ -439,6 +439,81 @@ TestCase {
         verify(colorDistance(glyphText.color, card.primaryTextColor) < 0.001);
     }
 
+    function test_tokyoSkylineAppearsForTokyoClock() {
+        const card = createCard(
+            "Asia/Tokyo",
+            {
+                "city": "Tokyo",
+                "label": "Tokyo",
+                "latitude": 35.654444,
+                "longitude": 139.744722
+            },
+            parts(2026, 4, 8, 14, 0, 0),
+            "+09:00",
+            220,
+            120
+        );
+        const skyline = findObject(card, "tokyoSkylineItem");
+        const nearLayer = findObject(card, "tokyoSkylineNearLayerItem");
+        const skytree = findObject(card, "tokyoSkytreeItem");
+
+        verify(skyline !== null);
+        verify(nearLayer !== null);
+        verify(skytree !== null);
+        compare(card.isTokyoClock, true);
+        compare(skyline.visible, true);
+    }
+
+    function test_tokyoNightLightsAppearAfterDark() {
+        const card = createCard(
+            "Asia/Tokyo",
+            {
+                "city": "Tokyo",
+                "label": "Tokyo",
+                "latitude": 35.654444,
+                "longitude": 139.744722
+            },
+            parts(2026, 4, 8, 21, 0, 0),
+            "+09:00",
+            220,
+            120
+        );
+        const windowLights = findObject(card, "tokyoWindowLightsLayerItem");
+        const firstWindowLight = findObject(card, "tokyoWindowLightItem");
+        const beacon = findObject(card, "tokyoTowerBeaconItem");
+
+        verify(windowLights !== null);
+        verify(firstWindowLight !== null);
+        verify(beacon !== null);
+        verify(card.tokyoNightWindowStrength > 0.5);
+        compare(windowLights.visible, true);
+        compare(beacon.visible, true);
+    }
+
+    function test_nonTokyoClockDoesNotShowTokyoSkyline() {
+        const card = createCard(
+            "Europe/London",
+            {
+                "city": "London",
+                "label": "London",
+                "latitude": 51.5072,
+                "longitude": -0.1276
+            },
+            parts(2026, 4, 8, 21, 0, 0),
+            "+01:00",
+            220,
+            120
+        );
+        const skyline = findObject(card, "tokyoSkylineItem");
+        const windowLights = findObject(card, "tokyoWindowLightsLayerItem");
+
+        verify(skyline !== null);
+        verify(windowLights !== null);
+        compare(card.isTokyoClock, false);
+        compare(skyline.visible, false);
+        compare(windowLights.visible, false);
+    }
+
     function test_missingWeatherCoordinatesStayAstronomyOnly() {
         const card = createCard(
             "Local",

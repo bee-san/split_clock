@@ -512,6 +512,8 @@ Item {
 
     readonly property string cityLabel: resolvedEntry.city || resolvedEntry.label || timeZoneId
     readonly property string timeText: root.formatTimeValue(sampledDateTime)
+    readonly property bool isTokyoClock: timeZoneId === "Asia/Tokyo"
+        || String(cityLabel || "").toLowerCase().indexOf("tokyo") !== -1
     readonly property real maxFeelsLikeTemperatureCelsius: {
         if (weatherStateOverride !== null && weatherStateOverride.maxFeelsLikeTemperatureCelsius !== undefined) {
             return Number(weatherStateOverride.maxFeelsLikeTemperatureCelsius);
@@ -552,6 +554,52 @@ Item {
     }
     readonly property bool showWeatherStatusCluster: weatherFetchStatus !== "inactive"
         && (weatherScene.available === true || hasMaxFeelsLikeTemperature)
+    readonly property real tokyoNightWindowStrength: {
+        if (!isTokyoClock) {
+            return 0;
+        }
+
+        const hour = sampledDateTime && sampledDateTime.hour !== undefined ? Number(sampledDateTime.hour) : 12;
+        const phaseBase = isTwilightPhase
+            ? 0.12
+            : (isNightPhase ? (isMidnightPhase ? 0.28 : 0.36) : 0);
+        const hourlyStrength = (hour >= 18 && hour <= 22)
+            ? 0.52
+            : ((hour >= 23 || hour < 2)
+                ? 0.34
+                : ((hour >= 2 && hour < 5)
+                    ? 0.18
+                    : ((hour >= 5 && hour < 7) ? 0.08 : 0)));
+
+        return root.clampRange((phaseBase + hourlyStrength) * (1 - (weatherHorizonFade * 0.18)), 0, 1);
+    }
+    readonly property real tokyoUrbanGlowStrength: root.clampRange(
+        tokyoNightWindowStrength
+        + (weatherScene.cloudOpacity * tokyoNightWindowStrength * 0.18)
+        + (weatherScene.fogOpacity * 0.12),
+        0,
+        1
+    )
+    readonly property color tokyoSkylineFarColor: root.withAlpha(
+        root.blendColors(root.skyBottomColor, root.themeBackgroundColor, root.isNightPhase ? 0.72 : 0.46),
+        root.isNightPhase ? 0.88 : 0.58
+    )
+    readonly property color tokyoSkylineNearColor: root.withAlpha(
+        root.blendColors(root.skyMidColor, root.themeBackgroundColor, root.isNightPhase ? 0.86 : 0.62),
+        root.isNightPhase ? 0.96 : 0.72
+    )
+    readonly property color tokyoWindowLightColor: root.withAlpha(
+        root.blendColors(root.horizonGlowColor, Qt.rgba(1, 0.95, 0.82, 1), 0.56),
+        0.18 + (tokyoNightWindowStrength * 0.44)
+    )
+    readonly property color tokyoUrbanGlowColor: root.withAlpha(
+        root.blendColors(root.horizonGlowColor, root.accentColor, 0.18),
+        tokyoUrbanGlowStrength * 0.22
+    )
+    readonly property color tokyoBeaconColor: root.withAlpha(
+        root.blendColors(Qt.rgba(1, 0.28, 0.22, 1), root.horizonGlowColor, 0.08),
+        0.26 + (tokyoNightWindowStrength * 0.42)
+    )
     readonly property int zoneSeed: root.hashString(timeZoneId + "|" + cityLabel)
     readonly property var sunBody: phasePalette.sunBody || ({ "visible": false, "x": 0.5, "y": 0.82, "sizeScale": 0 })
     readonly property var moonBody: phasePalette.moonBody || ({ "visible": false, "x": 0.5, "y": 0.82, "sizeScale": 0 })
@@ -876,6 +924,248 @@ Item {
                 opacity: root.weatherOrbOpacity
                 pulse: false
                 z: 2
+            }
+        }
+
+        Item {
+            id: tokyoSkyline
+
+            objectName: "tokyoSkylineItem"
+            visible: root.isTokyoClock
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: Math.max(root.cardScale * 0.26, parent.height * 0.32)
+            clip: true
+
+            Rectangle {
+                id: tokyoUrbanGlow
+
+                objectName: "tokyoUrbanGlowItem"
+                visible: root.tokyoUrbanGlowStrength > 0.04
+                width: parent.width * 1.12
+                height: parent.height * 0.44
+                radius: height / 2
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: -height * 0.28
+                gradient: Gradient {
+                    GradientStop {
+                        position: 0
+                        color: root.withAlpha(root.tokyoUrbanGlowColor, 0)
+                    }
+                    GradientStop {
+                        position: 0.46
+                        color: root.withAlpha(root.tokyoUrbanGlowColor, root.tokyoUrbanGlowColor.a * 0.42)
+                    }
+                    GradientStop {
+                        position: 1
+                        color: root.withAlpha(root.tokyoUrbanGlowColor, root.tokyoUrbanGlowColor.a)
+                    }
+                }
+            }
+
+            Item {
+                id: tokyoFarLayer
+
+                objectName: "tokyoSkylineFarLayerItem"
+                anchors.fill: parent
+
+                Repeater {
+                    model: 13
+
+                    delegate: Item {
+                        required property int index
+
+                        readonly property real widthFactor: 0.08 + (root.sampleUnit(index + 151, 1) * 0.08)
+                        readonly property real heightFactor: 0.22 + (root.sampleUnit(index + 151, 2) * 0.16)
+
+                        width: tokyoSkyline.width * widthFactor
+                        height: tokyoSkyline.height * heightFactor
+                        x: (tokyoSkyline.width / 12.2) * index - (width * 0.06)
+                        y: tokyoSkyline.height - height
+
+                        Rectangle {
+                            anchors.fill: parent
+                            color: root.tokyoSkylineFarColor
+                        }
+
+                        Rectangle {
+                            width: parent.width * 0.18
+                            height: parent.height * 0.1
+                            x: parent.width * 0.18
+                            y: parent.height * 0.08
+                            color: root.tokyoSkylineFarColor
+                        }
+                    }
+                }
+            }
+
+            Item {
+                id: tokyoNearLayer
+
+                objectName: "tokyoSkylineNearLayerItem"
+                anchors.fill: parent
+
+                Repeater {
+                    model: 10
+
+                    delegate: Item {
+                        id: windowBuilding
+
+                        required property int index
+
+                        readonly property real widthFactor: 0.09 + (root.sampleUnit(index + 181, 1) * 0.09)
+                        readonly property real heightFactor: 0.34 + (root.sampleUnit(index + 181, 2) * 0.34)
+
+                        width: tokyoSkyline.width * widthFactor
+                        height: tokyoSkyline.height * heightFactor
+                        x: (tokyoSkyline.width / 9.2) * index - (width * 0.04)
+                        y: tokyoSkyline.height - height
+
+                        Rectangle {
+                            anchors.fill: parent
+                            color: root.tokyoSkylineNearColor
+                        }
+
+                        Rectangle {
+                            width: parent.width * 0.28
+                            height: parent.height * 0.08
+                            x: parent.width * 0.16
+                            y: parent.height * 0.12
+                            color: root.tokyoSkylineNearColor
+                        }
+
+                        Rectangle {
+                            width: parent.width * 0.18
+                            height: parent.height * 0.06
+                            x: parent.width * 0.56
+                            y: parent.height * 0.18
+                            color: root.tokyoSkylineNearColor
+                        }
+
+                        Rectangle {
+                            visible: index % 3 === 0
+                            width: Math.max(1, parent.width * 0.05)
+                            height: parent.height * 0.16
+                            radius: width / 2
+                            x: parent.width * 0.68
+                            y: -parent.height * 0.1
+                            color: root.tokyoSkylineNearColor
+                        }
+                    }
+                }
+            }
+
+            Item {
+                id: tokyoWindowLightsLayer
+
+                objectName: "tokyoWindowLightsLayerItem"
+                anchors.fill: parent
+                visible: root.tokyoNightWindowStrength > 0.04
+
+                Repeater {
+                    model: 10
+
+                    delegate: Item {
+                        id: windowLightBuilding
+
+                        required property int index
+
+                        readonly property real widthFactor: 0.09 + (root.sampleUnit(index + 181, 1) * 0.09)
+                        readonly property real heightFactor: 0.34 + (root.sampleUnit(index + 181, 2) * 0.34)
+
+                        width: tokyoSkyline.width * widthFactor
+                        height: tokyoSkyline.height * heightFactor
+                        x: (tokyoSkyline.width / 9.2) * index - (width * 0.04)
+                        y: tokyoSkyline.height - height
+                        clip: true
+
+                        Repeater {
+                            model: Math.max(4, Math.round((parent.height / Math.max(6, root.cardScale * 0.05)) * 2.6))
+
+                            delegate: Rectangle {
+                                required property int index
+
+                                readonly property real lightSeed: root.sampleUnit((windowLightBuilding.index + 1) * 29 + index + 1, 19)
+                                readonly property real windowWidth: Math.max(1, parent.width * 0.08)
+                                readonly property real windowHeight: Math.max(1, parent.height * 0.035)
+
+                                objectName: windowLightBuilding.index === 0 && index === 0 ? "tokyoWindowLightItem" : ""
+                                visible: lightSeed < (0.16 + (root.tokyoNightWindowStrength * 0.54))
+                                width: windowWidth
+                                height: windowHeight
+                                radius: Math.min(width, height) / 3
+                                x: parent.width * (0.08 + (root.sampleUnit((windowLightBuilding.index + 1) * 37 + index + 1, 20) * 0.76))
+                                y: parent.height * (0.12 + (root.sampleUnit((windowLightBuilding.index + 1) * 41 + index + 1, 21) * 0.72))
+                                color: root.tokyoWindowLightColor
+                                opacity: 0.42 + (root.sampleUnit((windowLightBuilding.index + 1) * 43 + index + 1, 22) * 0.44)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Item {
+                id: tokyoSkytree
+
+                objectName: "tokyoSkytreeItem"
+                width: Math.max(root.cardScale * 0.05, parent.width * 0.06)
+                height: parent.height * 0.94
+                x: parent.width * 0.74
+                y: parent.height - height
+
+                Rectangle {
+                    width: parent.width * 0.22
+                    height: parent.height * 0.78
+                    radius: width / 2
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.bottom: parent.bottom
+                    color: root.tokyoSkylineNearColor
+                }
+
+                Rectangle {
+                    width: parent.width * 0.46
+                    height: parent.height * 0.08
+                    radius: height / 2
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: parent.height * 0.38
+                    color: root.tokyoSkylineNearColor
+                }
+
+                Rectangle {
+                    width: parent.width * 0.34
+                    height: parent.height * 0.06
+                    radius: height / 2
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: parent.height * 0.54
+                    color: root.tokyoSkylineNearColor
+                }
+
+                Rectangle {
+                    width: Math.max(1, parent.width * 0.08)
+                    height: parent.height * 0.18
+                    radius: width / 2
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.top
+                    color: root.tokyoSkylineNearColor
+                }
+
+                Rectangle {
+                    id: tokyoTowerBeacon
+
+                    objectName: "tokyoTowerBeaconItem"
+                    visible: root.tokyoNightWindowStrength > 0.04
+                    width: Math.max(2, parent.width * 0.18)
+                    height: width
+                    radius: width / 2
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.top
+                    anchors.topMargin: parent.height * 0.04
+                    color: root.tokyoBeaconColor
+                }
             }
         }
 
