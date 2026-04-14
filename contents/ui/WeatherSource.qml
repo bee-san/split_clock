@@ -11,7 +11,7 @@ Item {
     property real longitude: NaN
     property string timeZoneId: ""
     property bool weatherEnabled: true
-    property int refreshIntervalMs: 15 * 60 * 1000
+    property int refreshIntervalMs: 10 * 60 * 1000
     property var sceneState: WeatherScene.defaultSceneState()
     property var rawSceneState: WeatherScene.defaultSceneState()
     property var displaySceneState: WeatherScene.defaultSceneState()
@@ -22,11 +22,18 @@ Item {
     property int sceneTransitionDurationMs: 1400
     property int postRainClearingDurationMs: 75 * 60 * 1000
     property double lastRainTimestampMs: 0
+    property int retryAttempt: -1
     property real maxFeelsLikeTemperatureCelsius: NaN
     property string fetchStatus: "idle"
     property string errorText: ""
     property string lastObservationTime: ""
     property bool hasFetchedOnce: false
+    readonly property int baseRefreshIntervalMs: {
+        const configuredInterval = Number(root.refreshIntervalMs);
+
+        return isFinite(configuredInterval) && configuredInterval > 0 ? Math.max(60 * 1000, Math.round(configuredInterval)) : 600000;
+    }
+    readonly property var retryIntervalsMinutes: [1, 5, 10, 30]
 
     function canFetch() {
         return weatherEnabled && WeatherScene.eligibleForWeather(latitude, longitude, timeZoneId);
@@ -134,6 +141,44 @@ Item {
         applySceneState(derivedSceneStateForRaw(rawSceneState, Date.now()));
     }
 
+    function normalizeRefreshDelayMs(valueMs) {
+        const safeDelay = Number(valueMs);
+
+        if (!isFinite(safeDelay) || safeDelay <= 0) {
+            return root.baseRefreshIntervalMs;
+        }
+
+        return Math.max(60 * 1000, Math.round(safeDelay));
+    }
+
+    function scheduleRefreshTimer(delayMs) {
+        if (!canFetch()) {
+            refreshTimer.stop();
+            return;
+        }
+
+        refreshTimer.interval = root.normalizeRefreshDelayMs(delayMs);
+        refreshTimer.restart();
+    }
+
+    function scheduleSuccessRefresh() {
+        retryAttempt = -1;
+        scheduleRefreshTimer(root.baseRefreshIntervalMs);
+    }
+
+    function scheduleRetryRefresh() {
+        if (retryAttempt < 0) {
+            retryAttempt = 0;
+        } else if (retryAttempt < (root.retryIntervalsMinutes.length - 1)) {
+            retryAttempt += 1;
+        }
+
+        const selectedAttempt = Math.min(retryAttempt, root.retryIntervalsMinutes.length - 1);
+        const retryMinutes = root.retryIntervalsMinutes[selectedAttempt];
+
+        scheduleRefreshTimer(retryMinutes * 60 * 1000);
+    }
+
     function stepTransition(deltaMs) {
         if (!visualTransitionActive) {
             return;
@@ -195,6 +240,7 @@ Item {
                     root.fetchStatus = "ready";
                     root.errorText = "";
                     root.hasFetchedOnce = true;
+                    root.scheduleSuccessRefresh();
                     return;
                 } catch (error) {
                     root.handleFailure(String(error || "Parse error"));
@@ -218,21 +264,26 @@ Item {
 
         if (hasFetchedOnce) {
             fetchStatus = "stale";
-            return;
+        } else {
+            fetchStatus = "error";
+            maxFeelsLikeTemperatureCelsius = NaN;
+            rawSceneState = WeatherScene.defaultSceneState();
+            lastRainTimestampMs = 0;
+            applySceneState({
+                "status": "error",
+                "available": false,
+                "conditionLabel": "Unavailable"
+            });
         }
 
-        fetchStatus = "error";
-        maxFeelsLikeTemperatureCelsius = NaN;
-        rawSceneState = WeatherScene.defaultSceneState();
-        lastRainTimestampMs = 0;
-        applySceneState({
-            "status": "error",
-            "available": false,
-            "conditionLabel": "Unavailable"
-        });
+        scheduleRetryRefresh();
     }
 
     function scheduleRefresh() {
+        refreshDebounce.stop();
+        refreshTimer.stop();
+        retryAttempt = -1;
+
         if (canFetch()) {
             refreshDebounce.restart();
             return;
@@ -245,6 +296,7 @@ Item {
     onLongitudeChanged: scheduleRefresh()
     onTimeZoneIdChanged: scheduleRefresh()
     onWeatherEnabledChanged: scheduleRefresh()
+    onRefreshIntervalMsChanged: scheduleRefresh()
 
     Component.onCompleted: scheduleRefresh()
 
@@ -266,9 +318,11 @@ Item {
     }
 
     Timer {
-        interval: root.refreshIntervalMs
-        repeat: true
-        running: root.canFetch()
+        id: refreshTimer
+
+        interval: root.baseRefreshIntervalMs
+        repeat: false
+        running: false
         onTriggered: root.refresh()
     }
 

@@ -327,6 +327,12 @@ KCMUtils.ScrollViewKCM {
                 Layout.fillWidth: true
                 onTextChanged: page.rebuildAvailableZones()
             }
+
+            Shortcut {
+                enabled: addSheet.visible && searchField.activeFocus
+                sequence: "Ctrl+P"
+                onActivated: searchField.paste()
+            }
         }
 
         footer: QQC2.DialogButtonBox {

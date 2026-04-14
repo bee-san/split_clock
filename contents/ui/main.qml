@@ -20,10 +20,17 @@ PlasmoidItem {
     readonly property real cardWidth: gridMetrics.cardWidth
     readonly property real cardHeight: gridMetrics.cardHeight
     readonly property bool cinematicWeather: Plasmoid.configuration.cinematicWeather !== false
-    readonly property bool hideDaytimeMoon: Plasmoid.configuration.hideDaytimeMoon === true
     readonly property bool reducedMotion: Plasmoid.configuration.reducedMotion === true
     readonly property real weatherIntensity: Math.max(0.4, Number(Plasmoid.configuration.weatherIntensity || 100) / 100)
-    readonly property int weatherRefreshIntervalMinutes: Math.max(5, Number(Plasmoid.configuration.weatherRefreshIntervalMinutes || 15))
+    readonly property var weatherRefreshIntervalChoices: [1, 5, 10, 30]
+    readonly property int weatherRefreshIntervalMinutes: {
+        const configured = Math.max(1, Number(Plasmoid.configuration.weatherRefreshIntervalMinutes || 10));
+        const index = root.weatherRefreshIntervalChoices.indexOf(configured);
+
+        return index >= 0
+            ? configured
+            : 10;
+    }
 
     function calculateGridMetrics(count, availableWidth, availableHeight) {
         const safeCount = Math.max(1, count);
@@ -112,7 +119,6 @@ PlasmoidItem {
                 timeZoneId: zoneId
                 entry: TimeZoneCatalog.entryFor(zoneId, "")
                 cinematicWeather: root.cinematicWeather
-                hideDaytimeMoon: root.hideDaytimeMoon
                 reducedMotion: root.reducedMotion
                 weatherIntensity: root.weatherIntensity
                 weatherRefreshIntervalMinutes: root.weatherRefreshIntervalMinutes

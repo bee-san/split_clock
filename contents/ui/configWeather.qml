@@ -9,10 +9,15 @@ KCMUtils.ScrollViewKCM {
     id: page
 
     property bool cfg_cinematicWeather: true
-    property bool cfg_hideDaytimeMoon: false
     property bool cfg_reducedMotion: false
     property int cfg_weatherIntensity: 100
-    property int cfg_weatherRefreshIntervalMinutes: 15
+    property int cfg_weatherRefreshIntervalMinutes: 10
+    property var weatherRefreshIntervalChoices: [
+        { "value": 1, "label": i18n("1 minute") },
+        { "value": 5, "label": i18n("5 minutes") },
+        { "value": 10, "label": i18n("10 minutes") },
+        { "value": 30, "label": i18n("30 minutes") }
+    ]
 
     header: ColumnLayout {
         spacing: Kirigami.Units.smallSpacing
@@ -35,13 +40,6 @@ KCMUtils.ScrollViewKCM {
                 checked: page.cfg_cinematicWeather
                 text: checked ? i18n("Enabled") : i18n("Disabled")
                 onToggled: page.cfg_cinematicWeather = checked
-            }
-
-            QQC2.Switch {
-                Kirigami.FormData.label: i18n("Hide daytime moon:")
-                checked: page.cfg_hideDaytimeMoon
-                text: checked ? i18n("Always hide when the sun is up") : i18n("Only hide in heavier weather")
-                onToggled: page.cfg_hideDaytimeMoon = checked
             }
 
             QQC2.Switch {
@@ -79,13 +77,31 @@ KCMUtils.ScrollViewKCM {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.smallSpacing
 
-                QQC2.SpinBox {
-                    from: 5
-                    to: 60
-                    stepSize: 5
-                    value: page.cfg_weatherRefreshIntervalMinutes
-                    editable: true
-                    onValueModified: page.cfg_weatherRefreshIntervalMinutes = value
+                QQC2.ComboBox {
+                    Layout.fillWidth: true
+                    textRole: "label"
+                    model: page.weatherRefreshIntervalChoices
+                    currentIndex: {
+                        const choices = page.weatherRefreshIntervalChoices;
+                        let selectedIndex = -1;
+                        let fallbackIndex = 0;
+
+                        for (let index = 0; index < choices.length; index += 1) {
+                            const choice = choices[index];
+
+                            if (choice.value === 10) {
+                                fallbackIndex = index;
+                            }
+
+                            if (choice.value === page.cfg_weatherRefreshIntervalMinutes) {
+                                selectedIndex = index;
+                            }
+                        }
+
+                        return selectedIndex >= 0 ? selectedIndex : fallbackIndex;
+                    }
+
+                    onActivated: page.cfg_weatherRefreshIntervalMinutes = page.weatherRefreshIntervalChoices[index].value
                 }
 
                 QQC2.Label {

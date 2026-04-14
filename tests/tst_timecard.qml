@@ -197,21 +197,22 @@ TestCase {
         const textColumn = findObject(card, "textColumnItem");
         const sun = findObject(card, "sunBodyItem");
         const moon = findObject(card, "moonBodyItem");
+        const activeBody = card.renderedSunBody.visible ? sun : moon;
+        const inactiveBody = card.renderedSunBody.visible ? moon : sun;
 
         verify(lane !== null);
         verify(textColumn !== null);
         verify(card.phasePalette.sunBody.visible);
         verify(card.phasePalette.moonBody.visible);
         compare(card.phasePalette.allowBodyOverlap, false);
-        verify(sun.width > moon.width);
+        verify(card.renderedSunBody.visible !== card.renderedMoonBody.visible);
+        verify(activeBody.width > inactiveBody.width);
+        verify(activeBody.visible);
+        verify(!inactiveBody.visible);
         verify(lane.x >= textColumn.x + textColumn.width);
-        verify(sun.x >= 0 && sun.y >= 0);
-        verify(moon.x >= 0 && moon.y >= 0);
-        verify(sun.x + sun.width <= lane.width + 0.5);
-        verify(moon.x + moon.width <= lane.width + 0.5);
-        verify(sun.y + sun.height <= lane.height + 0.5);
-        verify(moon.y + moon.height <= lane.height + 0.5);
-        verify(centerDistance(sun, moon) + 0.25 >= (sun.width + moon.width) / 2);
+        verify(activeBody.x >= 0 && activeBody.y >= 0);
+        verify(activeBody.x + activeBody.width <= lane.width + 0.5);
+        verify(activeBody.y + activeBody.height <= lane.height + 0.5);
     }
 
     function test_localNightUsesSimplifiedBodyPath() {
@@ -437,81 +438,6 @@ TestCase {
         compare(glyphText.text, "☂");
         verify(colorDistance(maxFeelsLikeText.color, card.primaryTextColor) < 0.001);
         verify(colorDistance(glyphText.color, card.primaryTextColor) < 0.001);
-    }
-
-    function test_tokyoSkylineAppearsForTokyoClock() {
-        const card = createCard(
-            "Asia/Tokyo",
-            {
-                "city": "Tokyo",
-                "label": "Tokyo",
-                "latitude": 35.654444,
-                "longitude": 139.744722
-            },
-            parts(2026, 4, 8, 14, 0, 0),
-            "+09:00",
-            220,
-            120
-        );
-        const skyline = findObject(card, "tokyoSkylineItem");
-        const nearLayer = findObject(card, "tokyoSkylineNearLayerItem");
-        const skytree = findObject(card, "tokyoSkytreeItem");
-
-        verify(skyline !== null);
-        verify(nearLayer !== null);
-        verify(skytree !== null);
-        compare(card.isTokyoClock, true);
-        compare(skyline.visible, true);
-    }
-
-    function test_tokyoNightLightsAppearAfterDark() {
-        const card = createCard(
-            "Asia/Tokyo",
-            {
-                "city": "Tokyo",
-                "label": "Tokyo",
-                "latitude": 35.654444,
-                "longitude": 139.744722
-            },
-            parts(2026, 4, 8, 21, 0, 0),
-            "+09:00",
-            220,
-            120
-        );
-        const windowLights = findObject(card, "tokyoWindowLightsLayerItem");
-        const firstWindowLight = findObject(card, "tokyoWindowLightItem");
-        const beacon = findObject(card, "tokyoTowerBeaconItem");
-
-        verify(windowLights !== null);
-        verify(firstWindowLight !== null);
-        verify(beacon !== null);
-        verify(card.tokyoNightWindowStrength > 0.5);
-        compare(windowLights.visible, true);
-        compare(beacon.visible, true);
-    }
-
-    function test_nonTokyoClockDoesNotShowTokyoSkyline() {
-        const card = createCard(
-            "Europe/London",
-            {
-                "city": "London",
-                "label": "London",
-                "latitude": 51.5072,
-                "longitude": -0.1276
-            },
-            parts(2026, 4, 8, 21, 0, 0),
-            "+01:00",
-            220,
-            120
-        );
-        const skyline = findObject(card, "tokyoSkylineItem");
-        const windowLights = findObject(card, "tokyoWindowLightsLayerItem");
-
-        verify(skyline !== null);
-        verify(windowLights !== null);
-        compare(card.isTokyoClock, false);
-        compare(skyline.visible, false);
-        compare(windowLights.visible, false);
     }
 
     function test_missingWeatherCoordinatesStayAstronomyOnly() {

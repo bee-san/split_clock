@@ -16,11 +16,6 @@
       <default>true</default>
     </entry>
 
-    <entry name="hideDaytimeMoon" type="Bool">
-      <label>Always hide the daytime moon when the sun is visible.</label>
-      <default>false</default>
-    </entry>
-
     <entry name="reducedMotion" type="Bool">
       <label>Reduce weather animation motion.</label>
       <default>false</default>
@@ -33,7 +28,7 @@
 
     <entry name="weatherRefreshIntervalMinutes" type="Int">
       <label>Remote weather refresh interval in minutes.</label>
-      <default>15</default>
+      <default>10</default>
     </entry>
   </group>
 </kcfg>
