@@ -33,7 +33,13 @@ Item {
 
         return isFinite(configuredInterval) && configuredInterval > 0 ? Math.max(60 * 1000, Math.round(configuredInterval)) : 600000;
     }
-    readonly property var retryIntervalsMinutes: [1, 5, 10, 30]
+    readonly property var retryIntervalsMs: [
+        5 * 1000,
+        1 * 60 * 1000,
+        5 * 60 * 1000,
+        10 * 60 * 1000,
+        30 * 60 * 1000
+    ]
 
     function canFetch() {
         return weatherEnabled && WeatherScene.eligibleForWeather(latitude, longitude, timeZoneId);
@@ -44,6 +50,7 @@ Item {
             "latitude=" + encodeURIComponent(String(latitude)),
             "longitude=" + encodeURIComponent(String(longitude)),
             "current=weather_code,is_day,precipitation,rain,showers,snowfall,cloud_cover,relative_humidity_2m,wind_speed_10m,wind_direction_10m",
+            "hourly=weather_code,is_day,precipitation,rain,showers,snowfall,cloud_cover,relative_humidity_2m,wind_speed_10m,wind_direction_10m",
             "daily=apparent_temperature_max",
             "forecast_days=1",
             "temperature_unit=celsius",
@@ -107,6 +114,10 @@ Item {
             return normalizedRaw;
         }
 
+        if (normalizedRaw.postRainClearingEligible === false) {
+            return normalizedRaw;
+        }
+
         if (normalizedRaw.kind === "rain" || normalizedRaw.kind === "thunderstorm") {
             return normalizedRaw;
         }
@@ -126,7 +137,9 @@ Item {
 
         rawSceneState = normalizedRaw;
 
-        if (normalizedRaw.kind === "rain" || normalizedRaw.kind === "thunderstorm") {
+        if (normalizedRaw.postRainClearingEligible === false) {
+            lastRainTimestampMs = 0;
+        } else if (normalizedRaw.kind === "rain" || normalizedRaw.kind === "thunderstorm") {
             lastRainTimestampMs = referenceNow;
         }
 
@@ -169,14 +182,14 @@ Item {
     function scheduleRetryRefresh() {
         if (retryAttempt < 0) {
             retryAttempt = 0;
-        } else if (retryAttempt < (root.retryIntervalsMinutes.length - 1)) {
+        } else if (retryAttempt < (root.retryIntervalsMs.length - 1)) {
             retryAttempt += 1;
         }
 
-        const selectedAttempt = Math.min(retryAttempt, root.retryIntervalsMinutes.length - 1);
-        const retryMinutes = root.retryIntervalsMinutes[selectedAttempt];
+        const selectedAttempt = Math.min(retryAttempt, root.retryIntervalsMs.length - 1);
+        const retryDelayMs = root.retryIntervalsMs[selectedAttempt];
 
-        scheduleRefreshTimer(retryMinutes * 60 * 1000);
+        scheduleRefreshTimer(retryDelayMs);
     }
 
     function stepTransition(deltaMs) {

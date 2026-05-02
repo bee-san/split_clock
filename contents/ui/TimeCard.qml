@@ -366,25 +366,51 @@ Item {
     readonly property real skyBottomBlendStrength: isMidnightPhase ? 0.88 : (isNightPhase ? 0.82 : 0.72)
     readonly property real primaryTextBlendStrength: phasePalette.textBoost !== undefined ? phasePalette.textBoost : (isMidnightPhase ? 0.96 : (isNightPhase ? 0.9 : 0.28))
     readonly property real secondaryTextBlendStrength: Math.max(0.14, primaryTextBlendStrength * 0.82)
+    readonly property string weatherVisualKind: {
+        const signalKind = String(weatherScene.outsideHoursSignalKind || "");
 
-    readonly property color weatherToneColor: weatherScene.kind === "snow"
+        if (signalKind === "rain" || signalKind === "snow" || signalKind === "thunderstorm") {
+            return signalKind;
+        }
+
+        return weatherScene.kind;
+    }
+    readonly property real weatherRainStrength: weatherVisualKind === "rain"
+        ? Math.max(0.34, root.clampRange((weatherScene.rainDensity * 0.76) + (weatherScene.cloudOpacity * 0.24), 0, 1))
+        : (weatherVisualKind === "thunderstorm"
+            ? root.clampRange(0.84 + (weatherScene.storminess * 0.16), 0, 1)
+            : 0)
+
+    readonly property color weatherToneColor: weatherVisualKind === "snow"
         ? Qt.rgba(0.82, 0.88, 0.96, 1)
-        : (weatherScene.kind === "thunderstorm"
-            ? Qt.rgba(0.42, 0.48, 0.58, 1)
-            : (weatherScene.kind === "fog"
-                ? Qt.rgba(0.88, 0.91, 0.95, 1)
-                : Qt.rgba(0.72, 0.78, 0.86, 1)))
-    readonly property real weatherToneStrength: weatherScene.kind === "clear"
+        : (weatherVisualKind === "rain"
+            ? Qt.rgba(0.42, 0.47, 0.54, 1)
+            : (weatherVisualKind === "thunderstorm"
+                ? Qt.rgba(0.34, 0.39, 0.46, 1)
+                : (weatherVisualKind === "fog"
+                    ? Qt.rgba(0.72, 0.78, 0.84, 1)
+                    : Qt.rgba(0.72, 0.78, 0.86, 1))))
+    readonly property real weatherToneStrength: weatherVisualKind === "clear"
         ? weatherScene.cloudOpacity * 0.08
-        : (weatherScene.kind === "snow"
-            ? 0.22
-            : (weatherScene.kind === "fog"
-                ? 0.18
-                : (weatherScene.kind === "thunderstorm"
-                    ? 0.16 + (weatherScene.storminess * 0.14)
-                    : 0.1 + (weatherScene.cloudOpacity * 0.08))))
-    readonly property real weatherDimStrength: weatherScene.skyDimming !== undefined ? weatherScene.skyDimming : 0
-    readonly property real weatherContrastStrength: weatherScene.contrastSoftening !== undefined ? weatherScene.contrastSoftening : 0
+        : (weatherVisualKind === "snow"
+            ? 0.3
+            : (weatherVisualKind === "rain"
+                ? 0.34 + (weatherRainStrength * 0.22)
+                : (weatherVisualKind === "fog"
+                    ? 0.4
+                    : (weatherVisualKind === "thunderstorm"
+                        ? 0.28 + (weatherScene.storminess * 0.18)
+                        : 0.1 + (weatherScene.cloudOpacity * 0.08)))))
+    readonly property real weatherDimStrength: root.clampRange(
+        (weatherScene.skyDimming !== undefined ? weatherScene.skyDimming : 0) + (weatherRainStrength * 0.26),
+        0,
+        0.92
+    )
+    readonly property real weatherContrastStrength: root.clampRange(
+        (weatherScene.contrastSoftening !== undefined ? weatherScene.contrastSoftening : 0) + (weatherRainStrength * 0.08),
+        0,
+        0.9
+    )
     readonly property real weatherCoolStrength: weatherScene.coolTint !== undefined ? weatherScene.coolTint : 0
     readonly property real weatherHumidityHaze: weatherScene.humidityHaze !== undefined ? weatherScene.humidityHaze : 0
     readonly property real weatherHumidityBloom: weatherScene.humidityBloom !== undefined ? weatherScene.humidityBloom : 0
@@ -392,9 +418,38 @@ Item {
     readonly property real weatherStarVisibilityFactor: weatherScene.starVisibilityFactor !== undefined ? weatherScene.starVisibilityFactor : 1
     readonly property real weatherSunGlowFactor: weatherScene.sunGlowFactor !== undefined ? weatherScene.sunGlowFactor : 1
     readonly property real weatherMoonGlowFactor: weatherScene.moonGlowFactor !== undefined ? weatherScene.moonGlowFactor : 1
-    readonly property real weatherOrbOpacity: Math.max(
-        0.44,
-        1 - (weatherScene.cloudOpacity * 0.24) - (weatherScene.fogOpacity * 0.12) - (weatherHumidityHaze * 0.06)
+    readonly property real weatherOrbOpacity: root.clampRange(
+        1 - (weatherScene.cloudOpacity * 0.34) - (weatherScene.fogOpacity * 0.28) - (weatherHumidityHaze * 0.14) - (weatherRainStrength * 0.22),
+        0.12,
+        1
+    )
+    readonly property real weatherSunBodyOpacity: root.clampRange(
+        weatherOrbOpacity
+            * (weatherVisualKind === "rain"
+                ? 0
+                : (weatherVisualKind === "fog"
+                    ? 0
+                    : (weatherVisualKind === "snow"
+                        ? 0.58
+                        : (weatherVisualKind === "thunderstorm"
+                            ? 0
+                            : 1)))),
+        0,
+        1
+    )
+    readonly property real weatherMoonBodyOpacity: root.clampRange(
+        weatherOrbOpacity
+            * (weatherVisualKind === "rain"
+                ? 0.72
+                : (weatherVisualKind === "fog"
+                    ? 0
+                    : (weatherVisualKind === "snow"
+                        ? 0.64
+                        : (weatherVisualKind === "thunderstorm"
+                            ? 0.58
+                            : 1)))),
+        0,
+        1
     )
     readonly property real weatherHorizonFade: weatherScene.horizonFade !== undefined ? weatherScene.horizonFade : 0
     readonly property real weatherIntensityFactor: root.clampRange(weatherIntensity, 0.4, 1.4)
@@ -405,6 +460,7 @@ Item {
             + (weatherContrastStrength * 0.18)
             + (weatherHumidityHaze * 0.24)
             + (weatherHumidityBloom * 0.1)
+            + (weatherRainStrength * 0.18)
         ) * weatherIntensityFactor,
         0,
         0.96
@@ -415,6 +471,7 @@ Item {
             + (weatherScene.fogOpacity * 0.42)
             + (weatherScene.celestialVeilOpacity * 0.28)
             + (weatherHumidityHaze * 0.12)
+            + (weatherRainStrength * 0.16)
         ) * weatherIntensityFactor,
         0,
         0.86
@@ -426,14 +483,20 @@ Item {
             + (weatherScene.horizonFade * 0.12)
             + (weatherHumidityBloom * 0.12)
             + (weatherClearingStrength * 0.06)
+            + (weatherRainStrength * 0.2)
         ) * weatherIntensityFactor,
         0,
         0.9
     )
+    readonly property color weatherShadowColor: weatherVisualKind === "thunderstorm"
+        ? Qt.rgba(0.14, 0.16, 0.2, 1)
+        : (weatherVisualKind === "rain"
+            ? Qt.rgba(0.23, 0.26, 0.31, 1)
+            : themeBackgroundColor)
     readonly property color orbAtmosphereTintColor: root.blendColors(
         root.blendColors(root.skyMidColor, root.weatherCloudColor, 0.34 + (weatherDimStrength * 0.18)),
         root.weatherFogColor,
-        weatherHumidityHaze * 0.18
+        (weatherHumidityHaze * 0.18) + (weatherRainStrength * 0.12)
     )
     readonly property real twilightWarmth: phasePalette.twilightWarmth !== undefined ? phasePalette.twilightWarmth : 0
     readonly property real twilightCoolness: phasePalette.twilightCoolness !== undefined ? phasePalette.twilightCoolness : 0
@@ -452,31 +515,39 @@ Item {
     readonly property color accentColor: root.blendColors(baseAccentColor, weatherToneColor, weatherToneStrength * 0.42)
     readonly property color skyTopColor: root.blendColors(
         root.blendColors(baseSkyTopColor, weatherToneColor, weatherToneStrength + (weatherCoolStrength * 0.06)),
-        themeBackgroundColor,
-        weatherDimStrength
+        weatherShadowColor,
+        weatherDimStrength + (weatherRainStrength * 0.12)
     )
     readonly property color skyMidColor: root.blendColors(
         root.blendColors(baseSkyMidColor, weatherToneColor, weatherToneStrength + (weatherCoolStrength * 0.1)),
-        themeAltBackgroundColor,
-        weatherDimStrength * 0.82
+        weatherShadowColor,
+        (weatherDimStrength * 0.82) + (weatherRainStrength * 0.1)
     )
     readonly property color skyBottomColor: root.blendColors(
         root.blendColors(baseSkyBottomColor, weatherToneColor, (weatherToneStrength * 0.76) + (weatherCoolStrength * 0.18)),
-        themeAltBackgroundColor,
-        weatherDimStrength * 0.66
+        root.blendColors(weatherShadowColor, themeAltBackgroundColor, 0.38),
+        (weatherDimStrength * 0.66) + (weatherRainStrength * 0.16)
     )
     readonly property color horizonGlowColor: root.blendColors(
-        root.blendColors(baseHorizonGlowColor, weatherToneColor, weatherToneStrength * 0.16),
+        root.blendColors(baseHorizonGlowColor, weatherToneColor, weatherToneStrength * (weatherVisualKind === "rain" ? 0.42 : 0.16)),
         skyMidColor,
-        (weatherHorizonFade * 0.4) + (weatherHumidityHaze * 0.08)
+        (weatherHorizonFade * 0.4) + (weatherHumidityHaze * 0.08) + (weatherRainStrength * 0.72)
     )
     readonly property color railGlowColor: root.withAlpha(
         root.blendColors(accentColor, phasePalette.glow, 0.28 + (weatherContrastStrength * 0.06)),
         (isNightPhase ? 0.28 : 0.18) * (1 - (weatherContrastStrength * 0.18))
     )
     readonly property color sunHaloColor: root.blendColors(phasePalette.orbHalo, accentColor, 0.14)
-    readonly property color sunCoreColor: root.blendColors(phasePalette.orbCore, Qt.rgba(1, 1, 1, 1), 0.08)
-    readonly property color sunRimColor: root.blendColors(phasePalette.orbRim || phasePalette.orbCore, Qt.rgba(1, 1, 1, 1), 0.18)
+    readonly property color sunCoreColor: root.blendColors(
+        root.blendColors(phasePalette.orbCore, Qt.rgba(1, 1, 1, 1), 0.08),
+        root.orbAtmosphereTintColor,
+        weatherRainStrength * 0.76
+    )
+    readonly property color sunRimColor: root.blendColors(
+        root.blendColors(phasePalette.orbRim || phasePalette.orbCore, Qt.rgba(1, 1, 1, 1), 0.18),
+        root.orbAtmosphereTintColor,
+        weatherRainStrength * 0.82
+    )
     readonly property color moonHaloColor: root.blendColors(phasePalette.orbHalo, root.primaryTextColor, isNightPhase ? 0.1 : 0.16)
     readonly property color moonCoreColor: root.blendColors(phasePalette.orbCore, Qt.rgba(1, 1, 1, 1), 0.18)
     readonly property color moonRimColor: root.blendColors(phasePalette.orbRim || phasePalette.orbCore, Qt.rgba(1, 1, 1, 1), 0.24)
@@ -491,22 +562,41 @@ Item {
     readonly property color edgeHighlightColor: root.withAlpha(root.blendColors(Qt.rgba(1, 1, 1, 1), sunRimColor, 0.14), isNightPhase ? 0.18 : 0.12)
     readonly property color weatherCloudColor: root.blendColors(
         root.skyMidColor,
-        Qt.rgba(1, 1, 1, 1),
-        (weatherScene.kind === "snow" ? 0.32 : 0.18) + (weatherHumidityHaze * 0.08)
+        weatherRainStrength > 0
+            ? Qt.rgba(0.62, 0.67, 0.75, 1)
+            : Qt.rgba(1, 1, 1, 1),
+        (weatherVisualKind === "snow" ? 0.32 : (weatherRainStrength > 0 ? 0.22 : 0.18)) + (weatherHumidityHaze * 0.08)
     )
     readonly property color weatherCloudHighlightColor: root.blendColors(
         root.weatherCloudColor,
         Qt.rgba(1, 1, 1, 1),
-        (weatherScene.kind === "snow" ? 0.26 : 0.34) + (weatherHumidityBloom * 0.1)
+        (weatherVisualKind === "snow" ? 0.26 : (weatherRainStrength > 0 ? 0.08 : 0.34)) + (weatherHumidityBloom * 0.08)
     )
-    readonly property color weatherCloudShadowColor: root.blendColors(root.skyMidColor, root.themeBackgroundColor, 0.42 + (weatherDimStrength * 0.08))
-    readonly property color weatherPrecipitationColor: root.blendColors(root.primaryTextColor, Qt.rgba(0.82, 0.92, 1, 1), 0.34)
+    readonly property color weatherCloudShadowColor: root.blendColors(
+        root.skyMidColor,
+        root.themeBackgroundColor,
+        0.42 + (weatherDimStrength * 0.08) + (weatherRainStrength * 0.22)
+    )
+    readonly property color weatherPrecipitationColor: root.blendColors(
+        root.primaryTextColor,
+        weatherRainStrength > 0 ? Qt.rgba(0.74, 0.84, 0.96, 1) : Qt.rgba(0.82, 0.92, 1, 1),
+        weatherRainStrength > 0 ? 0.62 : 0.34
+    )
+    readonly property color weatherSnowColor: root.blendColors(
+        Qt.rgba(1, 1, 1, 1),
+        root.weatherCloudHighlightColor,
+        0.26
+    )
     readonly property color weatherFogColor: root.blendColors(
         root.skyMidColor,
         Qt.rgba(0.96, 0.98, 1, 1),
-        0.42 + (weatherHumidityHaze * 0.12)
+        0.82 + (weatherHumidityHaze * 0.12)
     )
-    readonly property color twilightWarmColor: root.blendColors(phasePalette.horizonGlow, Qt.rgba(1, 0.82, 0.68, 1), Math.min(0.42, twilightWarmth * 0.34))
+    readonly property color twilightWarmColor: root.blendColors(
+        root.blendColors(phasePalette.horizonGlow, Qt.rgba(1, 0.82, 0.68, 1), Math.min(0.42, twilightWarmth * 0.34)),
+        skyMidColor,
+        weatherRainStrength > 0 ? Math.min(0.86, 0.56 + (weatherRainStrength * 0.24)) : 0
+    )
     readonly property color twilightCoolColor: root.blendColors(phasePalette.skyTop, phasePalette.accent, Math.min(0.56, twilightCoolness * 0.42))
 
     readonly property string cityLabel: resolvedEntry.city || resolvedEntry.label || timeZoneId
@@ -522,9 +612,91 @@ Item {
     }
     readonly property bool hasMaxFeelsLikeTemperature: isFinite(maxFeelsLikeTemperatureCelsius)
     readonly property string maxFeelsLikeTemperatureText: hasMaxFeelsLikeTemperature ? Math.round(maxFeelsLikeTemperatureCelsius) + "C" : ""
+    readonly property bool hasOutsideHoursWeatherCue: {
+        const signalKind = String(weatherScene.outsideHoursSignalKind || "");
+
+        return signalKind === "rain" || signalKind === "snow" || signalKind === "thunderstorm";
+    }
+    readonly property string outsideHoursWeatherCueText: {
+        if (!weatherScene || weatherScene.available !== true || !hasOutsideHoursWeatherCue) {
+            return "";
+        }
+
+        return String(weatherScene.outsideHoursSignalLabel || "").toUpperCase() + " OUTSIDE";
+    }
+    readonly property string outsideHoursWeatherCueGlyph: {
+        const signalKind = String(weatherScene.outsideHoursSignalKind || "");
+
+        if (signalKind === "thunderstorm") {
+            return "⚡";
+        }
+
+        if (signalKind === "snow") {
+            return "❄";
+        }
+
+        if (signalKind === "rain") {
+            return "☂";
+        }
+
+        return "";
+    }
+    readonly property color outsideHoursWeatherCueBackgroundColor: {
+        const signalKind = String(weatherScene.outsideHoursSignalKind || "");
+
+        if (signalKind === "thunderstorm") {
+            return Qt.rgba(0.18, 0.2, 0.26, 0.92);
+        }
+
+        if (signalKind === "snow") {
+            return Qt.rgba(0.76, 0.83, 0.92, 0.9);
+        }
+
+        if (signalKind === "rain") {
+            return Qt.rgba(0.26, 0.35, 0.48, 0.9);
+        }
+
+        return Qt.rgba(0, 0, 0, 0);
+    }
+    readonly property color outsideHoursWeatherCueBorderColor: {
+        const signalKind = String(weatherScene.outsideHoursSignalKind || "");
+
+        if (signalKind === "thunderstorm") {
+            return Qt.rgba(0.92, 0.76, 0.18, 0.68);
+        }
+
+        if (signalKind === "snow") {
+            return Qt.rgba(0.94, 0.97, 1, 0.72);
+        }
+
+        if (signalKind === "rain") {
+            return Qt.rgba(0.78, 0.88, 1, 0.7);
+        }
+
+        return Qt.rgba(0, 0, 0, 0);
+    }
+    readonly property color outsideHoursWeatherCueTextColor: {
+        const signalKind = String(weatherScene.outsideHoursSignalKind || "");
+
+        return signalKind === "snow"
+            ? Qt.rgba(0.1, 0.16, 0.24, 1)
+            : Qt.rgba(0.98, 0.99, 1, 1);
+    }
     readonly property string weatherConditionGlyph: {
         if (weatherScene.available !== true) {
             return "";
+        }
+
+        if (weatherScene.outsideHoursSignalKind === "thunderstorm" && weatherScene.kind !== "thunderstorm") {
+            return "⚡";
+        }
+
+        if (weatherScene.outsideHoursSignalKind === "snow" && weatherScene.kind !== "snow") {
+            return "❄";
+        }
+
+        if (weatherScene.outsideHoursSignalKind === "rain" && weatherScene.kind !== "rain") {
+            return "☂";
         }
 
         if (weatherScene.kind === "thunderstorm") {
@@ -849,7 +1021,7 @@ Item {
                 atmosphericVeilOpacity: root.weatherAtmosphereStrength * 0.34
                 surfaceFlattening: root.orbSurfaceFlattening
                 rimSoftening: root.orbRimSoftening
-                opacity: root.weatherOrbOpacity
+                opacity: root.weatherSunBodyOpacity
                 z: 1
             }
 
@@ -874,7 +1046,7 @@ Item {
                 atmosphericVeilOpacity: root.weatherAtmosphereStrength * 0.42
                 surfaceFlattening: root.orbSurfaceFlattening * 0.9
                 rimSoftening: root.orbRimSoftening
-                opacity: root.weatherOrbOpacity
+                opacity: root.weatherMoonBodyOpacity
                 pulse: false
                 z: 2
             }
@@ -888,14 +1060,14 @@ Item {
             zoneSeed: root.zoneSeed
             cardScale: root.cardScale
             sunRect: ({
-                "visible": root.renderedSunBody.visible,
+                "visible": root.renderedSunBody.visible && root.weatherSunBodyOpacity > 0.1,
                 "x": orbLane.x + sunBodyItem.x,
                 "y": orbLane.y + sunBodyItem.y,
                 "width": sunBodyItem.width,
                 "height": sunBodyItem.height
             })
             moonRect: ({
-                "visible": root.renderedMoonBody.visible,
+                "visible": root.renderedMoonBody.visible && root.weatherMoonBodyOpacity > 0.1,
                 "x": orbLane.x + moonBodyItem.x,
                 "y": orbLane.y + moonBodyItem.y,
                 "width": moonBodyItem.width,
@@ -916,7 +1088,7 @@ Item {
             summerStrength: root.seasonalSummerStrength
             cloudColor: root.weatherCloudColor
             precipitationColor: root.weatherPrecipitationColor
-            snowColor: root.primaryTextColor
+            snowColor: root.weatherSnowColor
             fogColor: root.weatherFogColor
         }
 
@@ -927,14 +1099,14 @@ Item {
             zoneSeed: root.zoneSeed
             cardScale: root.cardScale
             sunRect: ({
-                "visible": root.renderedSunBody.visible,
+                "visible": root.renderedSunBody.visible && root.weatherSunBodyOpacity > 0.1,
                 "x": orbLane.x + sunBodyItem.x,
                 "y": orbLane.y + sunBodyItem.y,
                 "width": sunBodyItem.width,
                 "height": sunBodyItem.height
             })
             moonRect: ({
-                "visible": root.renderedMoonBody.visible,
+                "visible": root.renderedMoonBody.visible && root.weatherMoonBodyOpacity > 0.1,
                 "x": orbLane.x + moonBodyItem.x,
                 "y": orbLane.y + moonBodyItem.y,
                 "width": moonBodyItem.width,
@@ -955,7 +1127,7 @@ Item {
             summerStrength: root.seasonalSummerStrength
             cloudColor: root.weatherCloudColor
             precipitationColor: root.weatherPrecipitationColor
-            snowColor: root.primaryTextColor
+            snowColor: root.weatherSnowColor
             fogColor: root.weatherFogColor
         }
 
@@ -1005,6 +1177,66 @@ Item {
                         font.family: Kirigami.Theme.defaultFont.family
                         font.pixelSize: root.weatherGlyphFontSize
                         renderType: Text.QtRendering
+                    }
+                }
+
+                Item {
+                    visible: false
+                    width: outsideHoursCueBadge.width
+                    height: outsideHoursCueBadge.height
+
+                    Rectangle {
+                        id: outsideHoursCueBadge
+
+                        width: implicitWidth
+                        height: implicitHeight
+                        implicitWidth: outsideHoursCueRow.implicitWidth + Math.max(8, Math.round(root.cardScale * 0.03))
+                        implicitHeight: outsideHoursCueRow.implicitHeight + Math.max(4, Math.round(root.cardScale * 0.014))
+                        radius: height / 2
+                        color: Qt.rgba(
+                            root.outsideHoursWeatherCueBackgroundColor.r,
+                            root.outsideHoursWeatherCueBackgroundColor.g,
+                            root.outsideHoursWeatherCueBackgroundColor.b,
+                            root.outsideHoursWeatherCueBackgroundColor.a * 0.78
+                        )
+                        border.width: 1
+                        border.color: Qt.rgba(
+                            root.outsideHoursWeatherCueBorderColor.r,
+                            root.outsideHoursWeatherCueBorderColor.g,
+                            root.outsideHoursWeatherCueBorderColor.b,
+                            root.outsideHoursWeatherCueBorderColor.a * 0.7
+                        )
+
+                        Row {
+                            id: outsideHoursCueRow
+
+                            anchors.centerIn: parent
+                            spacing: Math.max(2, Math.round(root.cardScale * 0.008))
+
+                            Text {
+                                visible: false
+                                color: root.outsideHoursWeatherCueTextColor
+                                text: root.outsideHoursWeatherCueGlyph
+                                font.family: Kirigami.Theme.defaultFont.family
+                                font.bold: true
+                                font.weight: Font.DemiBold
+                                font.pixelSize: Math.max(9, Math.round(root.weatherMetricFontSize * 0.86))
+                                renderType: Text.QtRendering
+                            }
+
+                            Text {
+                                id: outsideHoursCueForeground
+
+                                objectName: "outsideHoursWeatherCueTextItem"
+                                color: root.outsideHoursWeatherCueTextColor
+                                text: root.outsideHoursWeatherCueText
+                                font.family: Kirigami.Theme.defaultFont.family
+                                font.bold: true
+                                font.weight: Font.DemiBold
+                                font.pixelSize: Math.max(8, Math.round(root.weatherMetricFontSize * 0.84))
+                                renderType: Text.NativeRendering
+                            }
+                        }
                     }
                 }
 

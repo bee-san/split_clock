@@ -12,7 +12,7 @@ Item {
     property color cloudShadowColor: Qt.rgba(0.54, 0.6, 0.7, 1)
     property color orbLightColor: Qt.rgba(1, 1, 1, 1)
     property color orbLightAccentColor: Qt.rgba(1, 1, 1, 1)
-    property color precipitationColor: Qt.rgba(0.9, 0.94, 1, 1)
+    property color precipitationColor: Qt.rgba(0.72, 0.82, 0.96, 1)
     property color snowColor: Qt.rgba(1, 1, 1, 1)
     property color fogColor: Qt.rgba(0.92, 0.94, 0.98, 1)
     property color lightningColor: Qt.rgba(1, 1, 1, 1)
@@ -30,6 +30,10 @@ Item {
     property var moonRect: null
 
     readonly property string weatherKind: sceneState && sceneState.kind ? String(sceneState.kind) : "clear"
+    readonly property string outsideHoursSignalKind: sceneState && sceneState.outsideHoursSignalKind ? String(sceneState.outsideHoursSignalKind) : ""
+    readonly property string effectiveWeatherKind: (outsideHoursSignalKind === "rain" || outsideHoursSignalKind === "snow" || outsideHoursSignalKind === "thunderstorm")
+        ? outsideHoursSignalKind
+        : weatherKind
     readonly property real cloudOpacity: sceneState && sceneState.cloudOpacity !== undefined ? sceneState.cloudOpacity : 0
     readonly property int cloudBandCount: sceneState && sceneState.cloudBandCount !== undefined ? sceneState.cloudBandCount : 0
     readonly property string cloudFamily: sceneState && sceneState.cloudFamily ? String(sceneState.cloudFamily) : "none"
@@ -47,6 +51,15 @@ Item {
     readonly property real snowDensity: sceneState && sceneState.snowDensity !== undefined ? sceneState.snowDensity : 0
     readonly property string snowBand: sceneState && sceneState.snowBand ? String(sceneState.snowBand) : "none"
     readonly property real storminess: sceneState && sceneState.storminess !== undefined ? sceneState.storminess : 0
+    readonly property real effectiveRainDensity: (weatherKind === "rain" || weatherKind === "thunderstorm")
+        ? rainDensity
+        : ((outsideHoursSignalKind === "rain" || outsideHoursSignalKind === "thunderstorm") ? Math.max(0.38, rainDensity) : 0)
+    readonly property string effectiveRainBand: (weatherKind === "rain" || weatherKind === "thunderstorm")
+        ? rainBand
+        : (outsideHoursSignalKind === "thunderstorm" ? "downpour" : (outsideHoursSignalKind === "rain" ? "drizzle" : "none"))
+    readonly property real effectiveStorminess: weatherKind === "thunderstorm"
+        ? storminess
+        : (outsideHoursSignalKind === "thunderstorm" ? Math.max(0.42, storminess) : storminess)
     readonly property real cloudShadowStrength: sceneState && sceneState.cloudShadowStrength !== undefined ? sceneState.cloudShadowStrength : 0
     readonly property real clearingStrength: sceneState && sceneState.clearingStrength !== undefined ? sceneState.clearingStrength : 0
     readonly property real cloudSpeed: sceneState && sceneState.cloudSpeed !== undefined ? sceneState.cloudSpeed : 0.12
@@ -57,8 +70,8 @@ Item {
     readonly property real cloudTravelDirection: Math.abs(windDrift) < 0.08 ? 1 : (windDrift > 0 ? 1 : -1)
     readonly property bool showClouds: cloudOpacity > 0.08
     readonly property bool showFog: fogOpacity > 0.05
-    readonly property bool showRain: weatherKind === "rain" || weatherKind === "thunderstorm"
-    readonly property bool showSnow: weatherKind === "snow"
+    readonly property bool showRain: effectiveWeatherKind === "rain" || effectiveWeatherKind === "thunderstorm"
+    readonly property bool showSnow: effectiveWeatherKind === "snow"
     readonly property real intensityFactor: root.clampRange(weatherIntensity, 0.4, 1.4)
     readonly property real sizeBudget: root.clampRange(0.42 + ((Math.min(root.width, root.height) - 72) / 120), 0.42, 1.04)
     readonly property real detailBudget: root.clampRange(
@@ -69,14 +82,14 @@ Item {
     readonly property real motionBudget: reducedMotion ? 0.28 : root.clampRange((cinematicWeather ? 1 : 0.8) * (0.54 + ((intensityFactor - 0.4) / 1.0) * 0.4), 0.3, 1)
     readonly property int rainParticleCount: showRain
         ? Math.max(6, Math.round(
-            (rainBand === "drizzle" ? Math.max(10, 12 + (rainDensity * 12)) : (rainBand === "downpour" ? Math.max(46, 54 + (rainDensity * 30)) : Math.max(24, 30 + (rainDensity * 20))))
+            (effectiveRainBand === "drizzle" ? Math.max(36, 44 + (effectiveRainDensity * 30)) : (effectiveRainBand === "downpour" ? Math.max(72, 82 + (effectiveRainDensity * 38)) : Math.max(40, 46 + (effectiveRainDensity * 28))))
             * detailBudget
         ))
         : 0
-    readonly property real rainAngleDegrees: ((windDrift * (14 + (windStrength * 34) + (storminess * 10))) + (storminess * 8)) * (0.38 + (motionBudget * 0.62))
+    readonly property real rainAngleDegrees: ((windDrift * (14 + (windStrength * 34) + (effectiveStorminess * 10))) + (effectiveStorminess * 8)) * (0.38 + (motionBudget * 0.62))
     readonly property int snowParticleCount: showSnow
         ? Math.max(6, Math.round(
-            (snowBand === "flurries" ? Math.max(10, 12 + (snowDensity * 12)) : (snowBand === "heavy" ? Math.max(32, 38 + (snowDensity * 26)) : Math.max(20, 22 + (snowDensity * 18))))
+            (snowBand === "flurries" ? Math.max(16, 18 + (snowDensity * 16)) : (snowBand === "heavy" ? Math.max(40, 48 + (snowDensity * 30)) : Math.max(28, 32 + (snowDensity * 22))))
             * detailBudget
         ))
         : 0
@@ -94,7 +107,8 @@ Item {
     readonly property real windStrength: root.clampUnit((Math.abs(windDrift) * 0.34) + (motionStrength * 0.82))
     readonly property real windShiftSpan: root.width * (0.05 + (windStrength * 0.2)) * (0.26 + (motionBudget * 0.74))
     readonly property real occlusionShiftSpan: Math.max(root.cardScale * 0.04, root.occlusionTargetRect.width * (0.14 + (windStrength * 0.18))) * (0.24 + (motionBudget * 0.76))
-    readonly property bool showRainCurtain: showRain && rainBand === "downpour" && detailBudget > 0.44
+    readonly property bool showRainCurtain: showRain
+        && detailBudget > 0.3
     readonly property bool showSnowNearField: showSnow && snowBand !== "flurries" && detailBudget > 0.4
     readonly property bool showFogSkyVeil: showFog && fogDepth > 0.3 && detailBudget > 0.36
     readonly property bool showHighCloudWisps: showClouds && cloudFamily === "wispy" && detailBudget > 0.52
@@ -111,6 +125,7 @@ Item {
         : 0
     readonly property bool showWindStreaks: detailBudget > 0.34
         && windStrength > 0.18
+        && !showRain
         && (showClouds || showFog || showRain || showSnow || storminess > 0.22)
     readonly property int windStreakCount: showWindStreaks
         ? Math.max(2, Math.round((2 + (windStrength * 7) + (storminess * 2)) * detailBudget))
@@ -123,17 +138,29 @@ Item {
         && !showSnow
         && detailBudget > 0.3
     readonly property real orbLightStrength: root.lightSourceVisible
-        ? root.clampUnit((root.lightSourceIsSun ? 0.46 : 0.24) + (root.twilightActive ? (root.lightSourceIsSun ? 0.08 : 0.04) : 0) - (root.fogOpacity * 0.16))
+        ? root.clampUnit(
+            (root.lightSourceIsSun ? 0.34 : 0.22)
+            + (root.twilightActive ? (root.lightSourceIsSun ? 0.08 : 0.04) : 0)
+            - (root.cloudOpacity * (root.lightSourceIsSun ? 0.18 : 0.1))
+            - (root.orbOcclusionOpacity * 0.22)
+            - (root.fogOpacity * 0.34)
+            - (root.effectiveRainDensity * 0.26)
+            - (root.effectiveStorminess * 0.18)
+        )
         : 0
-    readonly property color cloudLiningColor: root.blendColors(root.orbLightColor, root.cloudHighlightColor, root.lightSourceIsSun ? 0.22 : 0.4)
-    readonly property color cloudGlowColor: root.blendColors(root.orbLightAccentColor, root.twilightWarmColor, root.lightSourceIsSun ? 0.16 : 0.08)
+    readonly property color cloudLiningColor: root.lightSourceVisible
+        ? root.blendColors(root.orbLightColor, root.cloudHighlightColor, root.lightSourceIsSun ? 0.22 : 0.4)
+        : root.blendColors(root.cloudHighlightColor, root.cloudColor, (root.effectiveWeatherKind === "rain" || root.effectiveWeatherKind === "thunderstorm") ? 0.08 : 0.22)
+    readonly property color cloudGlowColor: root.lightSourceVisible
+        ? root.blendColors(root.orbLightAccentColor, root.twilightWarmColor, root.lightSourceIsSun ? 0.16 : 0.08)
+        : root.blendColors(root.cloudShadowColor, root.cloudColor, (root.effectiveWeatherKind === "rain" || root.effectiveWeatherKind === "thunderstorm") ? 0.34 : 0.18)
     readonly property real heatStrength: root.clampUnit(
         root.summerStrength
         * (root.lightSourceIsSun ? 1 : 0)
         * (root.twilightActive ? 0.54 : 1)
-        * (root.weatherKind === "clear" ? 1 : (root.weatherKind === "cloudy" ? Math.max(0, 0.58 - (root.cloudOpacity * 1.1)) : 0))
+        * (root.effectiveWeatherKind === "clear" ? 1 : (root.effectiveWeatherKind === "cloudy" ? Math.max(0, 0.58 - (root.cloudOpacity * 1.1)) : 0))
         * (1 - (root.fogOpacity * 0.92))
-        * (1 - (root.rainDensity * 0.8))
+        * (1 - (root.effectiveRainDensity * 0.8))
         * (1 - (root.snowDensity * 0.9))
     )
     readonly property bool showHeatShimmer: root.heatStrength > 0.08 && root.detailBudget > 0.34 && root.lightSourceVisible
@@ -143,6 +170,7 @@ Item {
     readonly property int nearFogBandCount: showFog ? Math.max(1, Math.round((fogDepth > 0.66 ? 3 : 2) * detailBudget)) : 0
     readonly property bool orbMaskActive: root.orbOcclusionOpacity > 0.08
         && root.orbOcclusionBands > 0
+        && root.occlusionTargetRect.visible
         && root.occlusionTargetRect.width > 0
         && root.occlusionTargetRect.height > 0
     readonly property var occlusionTargetRect: root.normalizedSunRect.visible
@@ -152,10 +180,14 @@ Item {
             : root.fallbackOcclusionRect())
     readonly property color cloudTopTintColor: root.twilightActive
         ? root.blendColors(root.cloudHighlightColor, root.twilightCoolColor, root.clampUnit((root.twilightCoolness * 0.42) + (root.windStrength * 0.06)))
-        : root.cloudHighlightColor
+        : ((root.effectiveWeatherKind === "rain" || root.effectiveWeatherKind === "thunderstorm")
+            ? root.blendColors(root.cloudHighlightColor, root.cloudColor, 0.46)
+            : root.cloudHighlightColor)
     readonly property color cloudWarmTintColor: root.twilightActive
         ? root.blendColors(root.cloudColor, root.twilightWarmColor, root.clampUnit(root.twilightWarmth * 0.46))
-        : root.cloudColor
+        : ((root.effectiveWeatherKind === "rain" || root.effectiveWeatherKind === "thunderstorm")
+            ? root.blendColors(root.cloudColor, root.cloudShadowColor, 0.12)
+            : root.cloudColor)
     readonly property color cloudUndersideTintColor: root.twilightActive
         ? root.blendColors(root.cloudShadowColor, root.twilightCoolColor, root.clampUnit(root.twilightCoolness * 0.28))
         : root.cloudShadowColor
@@ -168,6 +200,13 @@ Item {
     readonly property color cloudShadowTintColor: root.blendColors(root.cloudShadowColor, root.fogFarTintColor, 0.24 + (root.humidityHaze * 0.18))
     readonly property color humidityGlowColor: root.blendColors(root.cloudGlowColor, root.fogColor, 0.44 + (root.humidityHaze * 0.18))
     readonly property color clearingMistColor: root.blendColors(root.fogNearTintColor, root.cloudGlowColor, 0.12 + (root.clearingStrength * 0.14))
+    readonly property color rainVeilTopColor: root.blendColors(root.cloudShadowColor, root.precipitationColor, 0.08 + (root.effectiveRainDensity * 0.06))
+    readonly property color rainVeilMidColor: root.blendColors(root.cloudShadowColor, root.precipitationColor, 0.14 + (root.effectiveRainDensity * 0.1))
+    readonly property color rainVeilBottomColor: root.blendColors(root.cloudShadowColor, root.precipitationColor, 0.2 + (root.effectiveRainDensity * 0.14))
+    readonly property color snowVeilTopColor: root.blendColors(root.fogFarTintColor, root.snowColor, 0.42 + (root.snowDensity * 0.1))
+    readonly property color snowVeilBottomColor: root.blendColors(root.fogNearTintColor, root.snowColor, 0.56 + (root.snowDensity * 0.12))
+    readonly property color fogVeilTopColor: root.blendColors(root.fogFarTintColor, root.cloudShadowColor, 0.18 + (root.fogDepth * 0.08))
+    readonly property color fogVeilBottomColor: root.blendColors(root.fogNearTintColor, root.fogColor, 0.46 + (root.fogDepth * 0.14))
 
     visible: showClouds || showFog || showRain || showSnow || lightningEnabled || showHeatShimmer || showWindStreaks || showCloudShadows || showHumidityGlow || showClearingMist
     clip: true
@@ -225,6 +264,109 @@ Item {
             "width": fallbackWidth,
             "height": fallbackHeight
         };
+    }
+
+    Rectangle {
+        id: rainVeilLayer
+
+        objectName: "rainVeilLayerItem"
+        anchors.fill: parent
+        z: 1
+        visible: root.showRain
+        opacity: 0.32 + (root.effectiveRainDensity * 0.3) + (root.effectiveStorminess * 0.08)
+        gradient: Gradient {
+            GradientStop {
+                position: 0
+                color: root.withAlpha(root.rainVeilTopColor, 0.94)
+            }
+            GradientStop {
+                position: 0.58
+                color: root.withAlpha(root.rainVeilMidColor, 0.72)
+            }
+            GradientStop {
+                position: 1
+                color: root.withAlpha(root.rainVeilBottomColor, 0.52)
+            }
+        }
+    }
+
+    Rectangle {
+        id: snowVeilLayer
+
+        objectName: "snowVeilLayerItem"
+        anchors.fill: parent
+        z: 1
+        visible: root.showSnow
+        opacity: 0.2 + (root.snowDensity * 0.16)
+        gradient: Gradient {
+            GradientStop {
+                position: 0
+                color: root.withAlpha(root.snowVeilTopColor, 0.42)
+            }
+            GradientStop {
+                position: 0.6
+                color: root.withAlpha(root.snowVeilTopColor, 0.18)
+            }
+            GradientStop {
+                position: 1
+                color: root.withAlpha(root.snowVeilBottomColor, 0.34)
+            }
+        }
+    }
+
+    Rectangle {
+        id: fogVeilLayer
+
+        objectName: "fogVeilLayerItem"
+        anchors.fill: parent
+        z: 1
+        visible: root.showFog
+        opacity: 0.46 + (root.fogOpacity * 0.26) + (root.fogDepth * 0.14)
+        gradient: Gradient {
+            GradientStop {
+                position: 0
+                color: root.withAlpha(root.fogVeilTopColor, 0.82)
+            }
+            GradientStop {
+                position: 0.56
+                color: root.withAlpha(root.fogVeilTopColor, 0.52)
+            }
+            GradientStop {
+                position: 1
+                color: root.withAlpha(root.fogVeilBottomColor, 0.72)
+            }
+        }
+    }
+
+    Rectangle {
+        id: fogBankLayer
+
+        objectName: "fogBankLayerItem"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        y: parent.height * 0.34
+        height: parent.height * (0.24 + (root.fogDepth * 0.1))
+        z: 2
+        visible: root.showFog
+        opacity: 0.26 + (root.fogOpacity * 0.18) + (root.fogDepth * 0.1)
+        gradient: Gradient {
+            GradientStop {
+                position: 0
+                color: root.withAlpha(root.fogNearTintColor, 0)
+            }
+            GradientStop {
+                position: 0.42
+                color: root.withAlpha(root.blendColors(root.fogNearTintColor, root.fogColor, 0.28), 0.72)
+            }
+            GradientStop {
+                position: 0.76
+                color: root.withAlpha(root.blendColors(root.fogNearTintColor, root.fogColor, 0.16), 0.48)
+            }
+            GradientStop {
+                position: 1
+                color: root.withAlpha(root.fogNearTintColor, 0)
+            }
+        }
     }
 
     Item {
@@ -569,6 +711,7 @@ Item {
                 }
 
                 Rectangle {
+                    visible: !root.showLayeredStratus
                     width: parent.width * 0.42
                     height: parent.height * 0.7
                     radius: height / 2
@@ -576,11 +719,12 @@ Item {
                     y: parent.height * 0.06
                     color: root.withAlpha(
                         root.blendColors(root.cloudTopTintColor, root.twilightWarmColor, cloudCluster.warmEdgeStrength * 0.12),
-                        cloudCluster.baseOpacity * 0.9
+                        cloudCluster.baseOpacity * (root.showLayeredStratus ? 0.66 : 0.9)
                     )
                 }
 
                 Rectangle {
+                    visible: !root.showLayeredStratus
                     width: parent.width * 0.38
                     height: parent.height * 0.62
                     radius: height / 2
@@ -588,11 +732,92 @@ Item {
                     y: parent.height * 0.02
                     color: root.withAlpha(
                         root.blendColors(root.cloudWarmTintColor, root.twilightWarmColor, cloudCluster.warmEdgeStrength * 0.18),
-                        cloudCluster.baseOpacity * 0.88
+                        cloudCluster.baseOpacity * (root.showLayeredStratus ? 0.62 : 0.88)
                     )
                 }
 
                 Rectangle {
+                    visible: root.showLayeredStratus
+                    width: parent.width * 0.94
+                    height: parent.height * 0.24
+                    radius: height * 0.42
+                    x: parent.width * 0.02
+                    y: parent.height * 0.12
+                    rotation: root.cloudTravelDirection * -2
+                    gradient: Gradient {
+                        GradientStop {
+                            position: 0
+                            color: root.withAlpha(root.cloudTopTintColor, 0)
+                        }
+                        GradientStop {
+                            position: 0.22
+                            color: root.withAlpha(root.cloudTopTintColor, cloudCluster.baseOpacity * 0.26)
+                        }
+                        GradientStop {
+                            position: 0.68
+                            color: root.withAlpha(root.cloudWarmTintColor, cloudCluster.baseOpacity * 0.52)
+                        }
+                        GradientStop {
+                            position: 1
+                            color: root.withAlpha(root.cloudWarmTintColor, 0)
+                        }
+                    }
+                }
+
+                Rectangle {
+                    visible: root.showLayeredStratus
+                    width: parent.width * 0.74
+                    height: parent.height * 0.18
+                    radius: height * 0.46
+                    x: parent.width * 0.18
+                    y: parent.height * 0.02
+                    rotation: root.cloudTravelDirection * -4
+                    gradient: Gradient {
+                        GradientStop {
+                            position: 0
+                            color: root.withAlpha(root.cloudTopTintColor, 0)
+                        }
+                        GradientStop {
+                            position: 0.34
+                            color: root.withAlpha(root.cloudTopTintColor, cloudCluster.baseOpacity * 0.24)
+                        }
+                        GradientStop {
+                            position: 1
+                            color: root.withAlpha(root.cloudTopTintColor, 0)
+                        }
+                    }
+                }
+
+                Rectangle {
+                    visible: root.showLayeredStratus
+                    width: parent.width * 0.62
+                    height: parent.height * 0.16
+                    radius: height * 0.48
+                    x: parent.width * 0.08
+                    y: parent.height * 0.3
+                    rotation: root.cloudTravelDirection * 3
+                    gradient: Gradient {
+                        GradientStop {
+                            position: 0
+                            color: root.withAlpha(root.cloudUndersideTintColor, 0)
+                        }
+                        GradientStop {
+                            position: 0.28
+                            color: root.withAlpha(root.cloudUndersideTintColor, cloudCluster.baseOpacity * 0.18)
+                        }
+                        GradientStop {
+                            position: 0.74
+                            color: root.withAlpha(root.cloudUndersideTintColor, cloudCluster.baseOpacity * 0.34)
+                        }
+                        GradientStop {
+                            position: 1
+                            color: root.withAlpha(root.cloudUndersideTintColor, 0)
+                        }
+                    }
+                }
+
+                Rectangle {
+                    visible: !root.showLayeredStratus
                     width: parent.width * 0.58
                     height: Math.max(2, parent.height * 0.16)
                     radius: height / 2
@@ -602,7 +827,7 @@ Item {
                 }
 
                 Rectangle {
-                    visible: cloudCluster.silverLiningStrength > 0.04
+                    visible: root.lightSourceVisible && cloudCluster.silverLiningStrength > 0.04
                     width: parent.width * (root.cloudFamily === "shelf" ? 0.48 : 0.34)
                     height: Math.max(2, parent.height * (0.14 + (cloudCluster.lightTopBias * 0.06)))
                     radius: height / 2
@@ -618,7 +843,7 @@ Item {
                 }
 
                 Rectangle {
-                    visible: cloudCluster.glowBandStrength > 0.03
+                    visible: root.lightSourceVisible && cloudCluster.glowBandStrength > 0.03
                     width: parent.width * 0.52
                     height: Math.max(2, parent.height * 0.11)
                     radius: height / 2
@@ -1222,16 +1447,16 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        height: parent.height * (0.2 + (root.fogDepth * 0.16))
+        height: parent.height * (0.42 + (root.fogDepth * 0.24))
         visible: root.showFogSkyVeil
         gradient: Gradient {
             GradientStop {
                 position: 0
-                color: root.withAlpha(root.fogFarTintColor, root.fogOpacity * (0.12 + (root.fogDepth * 0.08)))
+                color: root.withAlpha(root.fogFarTintColor, root.fogOpacity * (0.44 + (root.fogDepth * 0.16)))
             }
             GradientStop {
                 position: 0.62
-                color: root.withAlpha(root.fogFarTintColor, root.fogOpacity * 0.06)
+                color: root.withAlpha(root.fogFarTintColor, root.fogOpacity * 0.3)
             }
             GradientStop {
                 position: 1
@@ -1280,12 +1505,12 @@ Item {
 
                 required property int index
 
-                readonly property real bandOpacity: root.fogOpacity * (0.1 + (root.fogDepth * 0.12) + (root.sampleUnit(index + 7, 2) * 0.07))
+                readonly property real bandOpacity: root.fogOpacity * (0.18 + (root.fogDepth * 0.16) + (root.sampleUnit(index + 7, 2) * 0.08))
                 readonly property real bandY: (root.height * 0.18) + (index * root.height * 0.18)
                 readonly property real horizontalShift: root.width * (0.06 + (Math.abs(root.windDrift) * 0.14) + (root.sampleUnit(index + 7, 3) * 0.08)) * (0.28 + (root.motionBudget * 0.72))
 
-                width: root.width * 1.3
-                height: root.height * (0.12 + (root.sampleUnit(index + 7, 4) * 0.06))
+                width: root.width * 1.38
+                height: root.height * (0.16 + (root.sampleUnit(index + 7, 4) * 0.08))
                 radius: height / 2
                 x: -root.width * 0.16
                 y: bandY
@@ -1349,12 +1574,12 @@ Item {
             delegate: Rectangle {
                 required property int index
 
-                readonly property real bandOpacity: root.fogOpacity * (0.14 + (root.fogDepth * 0.16) + (root.sampleUnit(index + 12, 2) * 0.08))
+                readonly property real bandOpacity: root.fogOpacity * (0.22 + (root.fogDepth * 0.18) + (root.sampleUnit(index + 12, 2) * 0.08))
                 readonly property real bandY: root.height * (0.28 + (index * 0.14))
                 readonly property real travelSpan: root.width * (0.1 + (root.windStrength * 0.16) + (root.sampleUnit(index + 12, 3) * 0.06)) * (0.28 + (root.motionBudget * 0.72))
 
-                width: root.width * 1.34
-                height: root.height * (0.14 + (root.sampleUnit(index + 12, 4) * 0.06))
+                width: root.width * 1.42
+                height: root.height * (0.18 + (root.sampleUnit(index + 12, 4) * 0.08))
                 radius: height / 2
                 y: bandY
                 color: Qt.rgba(0, 0, 0, 0)
@@ -1411,13 +1636,13 @@ Item {
             }
             GradientStop {
                 position: 0.5
-                color: root.withAlpha(root.fogNearTintColor, root.fogOpacity * (0.14 + (root.fogDepth * 0.08)))
+                color: root.withAlpha(root.fogNearTintColor, root.fogOpacity * (0.28 + (root.fogDepth * 0.16)))
             }
             GradientStop {
                 position: 1
                 color: root.withAlpha(
                     root.blendColors(root.fogNearTintColor, root.twilightWarmColor, root.twilightActive ? root.twilightWarmth * 0.18 : 0),
-                    root.fogOpacity * (0.26 + (root.fogDepth * 0.14))
+                    root.fogOpacity * (0.56 + (root.fogDepth * 0.2))
                 )
             }
         }
@@ -1436,12 +1661,12 @@ Item {
             delegate: Rectangle {
                 required property int index
 
-                readonly property real bandOpacity: root.fogOpacity * (0.16 + (root.fogDepth * 0.14) + (root.sampleUnit(index + 17, 2) * 0.08))
+                readonly property real bandOpacity: root.fogOpacity * (0.24 + (root.fogDepth * 0.18) + (root.sampleUnit(index + 17, 2) * 0.08))
                 readonly property real bandY: root.height * (0.42 + (index * 0.14))
                 readonly property real travelSpan: root.width * (0.14 + (Math.abs(root.windDrift) * 0.12)) * (0.3 + (root.motionBudget * 0.7))
 
-                width: root.width * 1.36
-                height: root.height * (0.16 + (root.sampleUnit(index + 17, 3) * 0.08))
+                width: root.width * 1.44
+                height: root.height * (0.2 + (root.sampleUnit(index + 17, 3) * 0.1))
                 radius: height / 2
                 y: bandY
                 color: Qt.rgba(0, 0, 0, 0)
@@ -1511,17 +1736,17 @@ Item {
         }
 
         Repeater {
-            model: 3
+            model: effectiveRainBand === "downpour" ? 7 : 6
 
             delegate: Rectangle {
                 required property int index
 
-                width: root.width * 1.42
-                height: root.height * (0.12 + (index * 0.03))
+                width: root.width * 1.5
+                height: root.height * ((root.effectiveRainBand === "downpour" ? 0.2 : 0.18) + (index * 0.05))
                 radius: height / 2
-                x: -root.width * 0.2 + rainCurtainLayer.driftOffset
-                y: root.height * (0.26 + (index * 0.16))
-                rotation: root.rainAngleDegrees * 0.18
+                x: -root.width * 0.24 + rainCurtainLayer.driftOffset
+                y: root.height * (0.1 + (index * 0.125))
+                rotation: root.rainAngleDegrees * 0.42
                 gradient: Gradient {
                     GradientStop {
                         position: 0
@@ -1529,7 +1754,24 @@ Item {
                     }
                     GradientStop {
                         position: 0.42
-                        color: root.withAlpha(root.precipitationColor, 0.04 + (root.rainDensity * 0.05))
+                        color: root.withAlpha(
+                            root.blendColors(root.precipitationColor, root.cloudShadowColor, 0.5),
+                            (root.effectiveRainBand === "downpour" ? 0.44 : 0.4) + (root.effectiveRainDensity * 0.3)
+                        )
+                    }
+                    GradientStop {
+                        position: 0.68
+                        color: root.withAlpha(
+                            root.blendColors(root.precipitationColor, root.cloudShadowColor, 0.32),
+                            (root.effectiveRainBand === "downpour" ? 0.34 : 0.28) + (root.effectiveRainDensity * 0.2)
+                        )
+                    }
+                    GradientStop {
+                        position: 0.84
+                        color: root.withAlpha(
+                            root.blendColors(root.precipitationColor, root.cloudShadowColor, 0.18),
+                            (root.effectiveRainBand === "downpour" ? 0.16 : 0.12) + (root.effectiveRainDensity * 0.12)
+                        )
                     }
                     GradientStop {
                         position: 1
@@ -1555,20 +1797,20 @@ Item {
 
                 readonly property real horizontalUnit: root.sampleUnit(index + 1, 11)
                 readonly property real verticalUnit: root.sampleUnit(index + 1, 12)
-                readonly property real streakOpacity: (root.rainBand === "drizzle" ? 0.06 : (root.rainBand === "downpour" ? 0.24 : 0.15))
-                    + (root.sampleUnit(index + 1, 13) * (root.rainBand === "drizzle" ? 0.1 : 0.18))
-                    + (root.storminess * 0.1)
-                readonly property real durationScale: (root.rainBand === "drizzle" ? 1.26 : (root.rainBand === "downpour" ? 0.58 : 0.82)) + (root.sampleUnit(index + 1, 14) * 0.42)
-                readonly property real lengthFactor: root.rainBand === "drizzle" ? 0.52 : (root.rainBand === "downpour" ? 1.54 : 1)
+                readonly property real streakOpacity: (root.effectiveRainBand === "drizzle" ? 0.56 : (root.effectiveRainBand === "downpour" ? 0.34 : 0.24))
+                    + (root.sampleUnit(index + 1, 13) * (root.effectiveRainBand === "drizzle" ? 0.36 : 0.22))
+                    + (root.effectiveStorminess * 0.12)
+                readonly property real durationScale: (root.effectiveRainBand === "drizzle" ? 1.18 : (root.effectiveRainBand === "downpour" ? 0.46 : 0.72)) + (root.sampleUnit(index + 1, 14) * 0.34)
+                readonly property real lengthFactor: root.effectiveRainBand === "drizzle" ? 1.34 : (root.effectiveRainBand === "downpour" ? 1.78 : 1.18)
                 readonly property real startX: (horizontalUnit * (root.width + (root.height * 0.44))) - (root.height * 0.22)
                 readonly property real windOffset: root.windDrift * root.height * (0.16 + (root.windStrength * 0.26)) * (0.26 + (root.motionBudget * 0.74))
-                readonly property int fallDuration: Math.round((820 - (root.windStrength * 220) - (root.storminess * 140)) * durationScale)
+                readonly property int fallDuration: Math.round((820 - (root.windStrength * 220) - (root.effectiveStorminess * 140)) * durationScale)
 
-                width: Math.max(1, Math.round(root.cardScale * (root.rainBand === "downpour" ? 0.01 : (root.rainBand === "drizzle" ? 0.003 : 0.006))))
+                width: Math.max(1, Math.round(root.cardScale * (root.effectiveRainBand === "downpour" ? 0.013 : (root.effectiveRainBand === "drizzle" ? 0.01 : 0.008))))
                 height: Math.max(root.cardScale * 0.1, root.height * (0.06 + (root.sampleUnit(index + 1, 15) * 0.06)) * lengthFactor)
                 radius: width / 2
                 x: startX
-                rotation: root.rainAngleDegrees + (root.sampleUnit(index + 1, 16) * (root.rainBand === "drizzle" ? 4 : 8))
+                rotation: root.rainAngleDegrees + (root.sampleUnit(index + 1, 16) * (root.effectiveRainBand === "drizzle" ? 4 : 8))
                 color: root.withAlpha(root.precipitationColor, streakOpacity)
 
                 SequentialAnimation on y {
@@ -1613,8 +1855,8 @@ Item {
 
                 readonly property real horizontalUnit: root.sampleUnit(index + 1, 21)
                 readonly property real driftAmplitude: root.width * ((root.snowBand === "flurries" ? 0.028 : (root.snowBand === "heavy" ? 0.062 : 0.04)) + (root.sampleUnit(index + 1, 22) * 0.03) + (root.windStrength * 0.04)) * (0.28 + (root.motionBudget * 0.72))
-                readonly property real flakeOpacity: (root.snowBand === "heavy" ? 0.46 : (root.snowBand === "flurries" ? 0.18 : 0.3)) + (root.sampleUnit(index + 1, 23) * 0.28)
-                readonly property real sizeFactor: (root.snowBand === "flurries" ? 0.004 : (root.snowBand === "heavy" ? 0.016 : 0.01)) + (root.sampleUnit(index + 1, 24) * 0.012)
+                readonly property real flakeOpacity: (root.snowBand === "heavy" ? 0.62 : (root.snowBand === "flurries" ? 0.32 : 0.46)) + (root.sampleUnit(index + 1, 23) * 0.18)
+                readonly property real sizeFactor: (root.snowBand === "flurries" ? 0.006 : (root.snowBand === "heavy" ? 0.02 : 0.013)) + (root.sampleUnit(index + 1, 24) * 0.014)
                 readonly property real durationScale: (root.snowBand === "flurries" ? 1.28 : (root.snowBand === "heavy" ? 0.72 : 0.92)) + (root.sampleUnit(index + 1, 25) * 0.38)
                 readonly property real startX: horizontalUnit * root.width
                 readonly property real driftBias: root.windDrift * root.width * (0.05 + (root.windStrength * 0.12)) * (0.28 + (root.motionBudget * 0.72))
@@ -1667,7 +1909,7 @@ Item {
         visible: root.showSnowNearField
 
         Repeater {
-            model: Math.max(4, Math.round((root.snowBand === "heavy" ? 14 : 7) * root.detailBudget))
+            model: Math.max(6, Math.round((root.snowBand === "heavy" ? 18 : 10) * root.detailBudget))
 
             delegate: Rectangle {
                 required property int index
@@ -1678,10 +1920,10 @@ Item {
                 readonly property real driftBias: root.windDrift * root.width * (0.08 + (root.windStrength * 0.1)) * (0.28 + (root.motionBudget * 0.72))
                 readonly property int fallDuration: Math.round((2000 - (root.windStrength * 500)) * (0.72 + (root.sampleUnit(index + 31, 23) * 0.34)))
 
-                width: Math.max(3, Math.round(root.cardScale * ((root.snowBand === "heavy" ? 0.018 : 0.012) + (root.sampleUnit(index + 31, 24) * 0.01))))
+                width: Math.max(3, Math.round(root.cardScale * ((root.snowBand === "heavy" ? 0.022 : 0.015) + (root.sampleUnit(index + 31, 24) * 0.012))))
                 height: width
                 radius: width / 2
-                color: root.withAlpha(root.snowColor, (root.snowBand === "heavy" ? 0.44 : 0.3) + (root.sampleUnit(index + 31, 25) * 0.22))
+                color: root.withAlpha(root.snowColor, (root.snowBand === "heavy" ? 0.58 : 0.42) + (root.sampleUnit(index + 31, 25) * 0.16))
 
                 SequentialAnimation on y {
                     loops: Animation.Infinite

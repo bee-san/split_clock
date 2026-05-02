@@ -6,6 +6,24 @@ const FOG_KIND = "fog";
 const RAIN_KIND = "rain";
 const SNOW_KIND = "snow";
 const THUNDERSTORM_KIND = "thunderstorm";
+const KIND_SEVERITY = {
+    "clear": 0,
+    "cloudy": 1,
+    "fog": 2,
+    "rain": 3,
+    "snow": 4,
+    "thunderstorm": 5
+};
+const DOMINANT_DAY_AVERAGE_FIELDS = [
+    "precipitation",
+    "rain",
+    "showers",
+    "snowfall",
+    "cloud_cover",
+    "relative_humidity_2m",
+    "wind_speed_10m",
+    "wind_direction_10m"
+];
 
 function clamp(value, minimum, maximum) {
     return Math.max(minimum, Math.min(maximum, value));
@@ -96,6 +114,8 @@ function defaultSceneState() {
         "available": false,
         "status": "inactive",
         "kind": CLEAR_KIND,
+        "outsideHoursSignalKind": "",
+        "outsideHoursSignalLabel": "",
         "conditionLabel": "Unavailable",
         "isDay": true,
         "rawWeatherCode": -1,
@@ -135,7 +155,8 @@ function defaultSceneState() {
         "moonGlowFactor": 1,
         "horizonFade": 0,
         "clearingStrength": 0,
-        "cloudSpeed": 0.12
+        "cloudSpeed": 0.12,
+        "postRainClearingEligible": true
     };
 }
 
@@ -149,6 +170,8 @@ function normalizeSceneState(sceneState) {
 
     normalized.kind = sceneKind(normalized.kind);
     normalized.available = normalized.available === true;
+    normalized.outsideHoursSignalKind = String(normalized.outsideHoursSignalKind || "");
+    normalized.outsideHoursSignalLabel = String(normalized.outsideHoursSignalLabel || "");
     normalized.isDay = normalized.isDay !== false;
     normalized.rawWeatherCode = Math.round(numeric(normalized.rawWeatherCode, -1));
     normalized.cloudCover = clamp(numeric(normalized.cloudCover, 0), 0, 1);
@@ -187,6 +210,7 @@ function normalizeSceneState(sceneState) {
     normalized.horizonFade = clamp(numeric(normalized.horizonFade, 0), 0, 1);
     normalized.clearingStrength = clamp(numeric(normalized.clearingStrength, 0), 0, 1);
     normalized.cloudSpeed = clamp(numeric(normalized.cloudSpeed, 0.12), 0.04, 0.48);
+    normalized.postRainClearingEligible = normalized.postRainClearingEligible !== false;
     normalized.status = String(normalized.status || "inactive");
     normalized.conditionLabel = String(normalized.conditionLabel || "Unknown");
     normalized.observationTime = String(normalized.observationTime || "");
@@ -283,6 +307,310 @@ function eligibleForWeather(latitude, longitude, timeZoneId) {
     }
 
     return isFinite(Number(latitude)) && isFinite(Number(longitude));
+}
+
+function severityForKind(kind) {
+    return KIND_SEVERITY[sceneKind(kind)] || 0;
+}
+
+function weatherCodePriority(code) {
+    const weatherCode = Math.round(numeric(code, -1));
+
+    return (severityForKind(kindForWeatherCode(weatherCode)) * 1000) + Math.max(0, weatherCode);
+}
+
+function averageHourlyField(samples, fieldName) {
+    if (!samples || samples.length === 0) {
+        return 0;
+    }
+
+    let total = 0;
+
+    for (let index = 0; index < samples.length; index += 1) {
+        total += numeric(samples[index][fieldName], 0);
+    }
+
+    return total / samples.length;
+}
+
+function strongestPrecipitationValue(sample) {
+    if (!sample) {
+        return 0;
+    }
+
+    return Math.max(
+        numeric(sample.precipitation, 0),
+        numeric(sample.rain, 0) + numeric(sample.showers, 0),
+        numeric(sample.snowfall, 0)
+    );
+}
+
+function localDayKeyForApiResponse(apiResponse) {
+    const current = apiResponse && apiResponse.current ? apiResponse.current : {};
+    const currentTime = String(current.time || "");
+
+    if (currentTime.length >= 10) {
+        return currentTime.slice(0, 10);
+    }
+
+    const hourly = apiResponse && apiResponse.hourly ? apiResponse.hourly : {};
+    const hourlyTimes = Array.isArray(hourly.time) ? hourly.time : [];
+
+    return hourlyTimes.length > 0 ? String(hourlyTimes[0] || "").slice(0, 10) : "";
+}
+
+function collectHourlySamplesForLocalDay(apiResponse) {
+    const hourly = apiResponse && apiResponse.hourly ? apiResponse.hourly : null;
+
+    if (!hourly || !Array.isArray(hourly.time) || !Array.isArray(hourly.weather_code)) {
+        return [];
+    }
+
+    const targetDayKey = localDayKeyForApiResponse(apiResponse);
+    const sampleCount = Math.min(hourly.time.length, hourly.weather_code.length);
+    const samples = [];
+
+    if (!targetDayKey || sampleCount <= 0) {
+        return samples;
+    }
+
+    for (let index = 0; index < sampleCount; index += 1) {
+        const sampleTime = String(hourly.time[index] || "");
+        const weatherCode = Math.round(numeric(hourly.weather_code[index], NaN));
+
+        if (sampleTime.slice(0, 10) !== targetDayKey || !isFinite(weatherCode)) {
+            continue;
+        }
+
+        samples.push({
+            "time": sampleTime,
+            "weather_code": weatherCode,
+            "is_day": numeric(hourly.is_day && hourly.is_day[index], 1),
+            "precipitation": numeric(hourly.precipitation && hourly.precipitation[index], 0),
+            "rain": numeric(hourly.rain && hourly.rain[index], 0),
+            "showers": numeric(hourly.showers && hourly.showers[index], 0),
+            "snowfall": numeric(hourly.snowfall && hourly.snowfall[index], 0),
+            "cloud_cover": numeric(hourly.cloud_cover && hourly.cloud_cover[index], 0),
+            "relative_humidity_2m": numeric(hourly.relative_humidity_2m && hourly.relative_humidity_2m[index], 0),
+            "wind_speed_10m": numeric(hourly.wind_speed_10m && hourly.wind_speed_10m[index], 0),
+            "wind_direction_10m": numeric(hourly.wind_direction_10m && hourly.wind_direction_10m[index], 0),
+            "kind": kindForWeatherCode(weatherCode)
+        });
+    }
+
+    return samples;
+}
+
+function localHourFromTimestamp(timestampText) {
+    const match = String(timestampText || "").match(/T(\d{2})/);
+
+    return match ? Math.max(0, Math.min(23, Number(match[1]))) : -1;
+}
+
+function samplePriorityWeight(sample) {
+    const hour = localHourFromTimestamp(sample && sample.time);
+
+    if (hour >= 8 && hour <= 22) {
+        return 3;
+    }
+
+    return 1;
+}
+
+function dominantKindForSamples(samples) {
+    let winnerKind = CLEAR_KIND;
+    let winnerCount = -1;
+    let winnerScore = -1;
+    const counts = {};
+    const scores = {};
+
+    for (let index = 0; index < samples.length; index += 1) {
+        const sample = samples[index];
+        const kind = sceneKind(sample.kind);
+        const weight = samplePriorityWeight(sample);
+
+        counts[kind] = (counts[kind] || 0) + weight;
+        scores[kind] = (scores[kind] || 0) + (Math.max(0.5, severityForKind(kind)) * weight);
+    }
+
+    for (const kind in counts) {
+        const count = counts[kind];
+        const score = scores[kind] || 0;
+
+        if (score > winnerScore
+                || (score === winnerScore && count > winnerCount)
+                || (score === winnerScore && count === winnerCount && severityForKind(kind) > severityForKind(winnerKind))) {
+            winnerKind = kind;
+            winnerCount = count;
+            winnerScore = score;
+        }
+    }
+
+    return winnerCount > 0 ? winnerKind : "";
+}
+
+function representativeWeatherCodeForSamples(samples) {
+    let winnerCode = -1;
+    let winnerCount = -1;
+    const counts = {};
+
+    for (let index = 0; index < samples.length; index += 1) {
+        const weatherCode = Math.round(numeric(samples[index].weather_code, -1));
+
+        if (weatherCode < 0) {
+            continue;
+        }
+
+        counts[weatherCode] = (counts[weatherCode] || 0) + 1;
+    }
+
+    for (const codeKey in counts) {
+        const weatherCode = Math.round(numeric(codeKey, -1));
+        const count = counts[codeKey];
+
+        if (count > winnerCount || (count === winnerCount && weatherCodePriority(weatherCode) > weatherCodePriority(winnerCode))) {
+            winnerCode = weatherCode;
+            winnerCount = count;
+        }
+    }
+
+    return winnerCode;
+}
+
+function strongestSampleForKind(samples) {
+    let winnerSample = null;
+    let winnerAmount = -1;
+    let winnerPriority = -1;
+
+    for (let index = 0; index < samples.length; index += 1) {
+        const sample = samples[index];
+        const amount = strongestPrecipitationValue(sample);
+        const priority = weatherCodePriority(sample.weather_code);
+
+        if (amount > winnerAmount || (amount === winnerAmount && priority > winnerPriority)) {
+            winnerSample = sample;
+            winnerAmount = amount;
+            winnerPriority = priority;
+        }
+    }
+
+    return winnerSample;
+}
+
+function adjustedRepresentativeWeatherCode(kind, sample) {
+    const dominantKind = sceneKind(kind);
+    const sourceSample = sample || {};
+    const sourceCode = Math.round(numeric(sourceSample.weather_code, -1));
+    const precipitationAmount = strongestPrecipitationValue(sourceSample);
+
+    if (dominantKind === RAIN_KIND) {
+        if (precipitationAmount >= 2.8) {
+            return 63;
+        }
+
+        if (precipitationAmount >= 0.6 && sourceCode >= 51 && sourceCode <= 57) {
+            return 61;
+        }
+    }
+
+    return sourceCode;
+}
+
+function outsideHoursSignalForSamples(samples) {
+    const prioritizedSamples = samples.filter(sample => samplePriorityWeight(sample) > 1);
+    const precipSamples = prioritizedSamples.filter(sample => {
+        const kind = sceneKind(sample.kind);
+
+        return (kind === RAIN_KIND || kind === SNOW_KIND || kind === THUNDERSTORM_KIND)
+            && strongestPrecipitationValue(sample) > 0;
+    });
+
+    if (precipSamples.length === 0) {
+        return null;
+    }
+
+    let winnerSample = null;
+    let winnerScore = -1;
+
+    for (let index = 0; index < precipSamples.length; index += 1) {
+        const sample = precipSamples[index];
+        const kind = sceneKind(sample.kind);
+        const score = (strongestPrecipitationValue(sample) * 100) + weatherCodePriority(sample.weather_code) + (severityForKind(kind) * 1000);
+
+        if (score > winnerScore) {
+            winnerSample = sample;
+            winnerScore = score;
+        }
+    }
+
+    if (!winnerSample) {
+        return null;
+    }
+
+    const signalKind = sceneKind(winnerSample.kind);
+    const signalCode = adjustedRepresentativeWeatherCode(signalKind, winnerSample);
+
+    return {
+        "kind": signalKind,
+        "label": conditionLabelForCode(signalCode),
+        "weatherCode": signalCode
+    };
+}
+
+function representativeCurrentDataFromHourly(apiResponse) {
+    const samples = collectHourlySamplesForLocalDay(apiResponse);
+
+    if (samples.length === 0) {
+        return null;
+    }
+
+    const outsideHoursSignal = outsideHoursSignalForSamples(samples);
+    const dominantKind = dominantKindForSamples(samples);
+    const outsideSignalKind = outsideHoursSignal ? sceneKind(outsideHoursSignal.kind) : "";
+    const visualKind = (outsideSignalKind === RAIN_KIND
+            || outsideSignalKind === SNOW_KIND
+            || outsideSignalKind === THUNDERSTORM_KIND)
+        ? outsideSignalKind
+        : dominantKind;
+    const winningSamples = samples.filter(sample => sceneKind(sample.kind) === visualKind);
+    const priorityWinningSamples = winningSamples.filter(sample => samplePriorityWeight(sample) > 1);
+    const focusSamples = priorityWinningSamples.length > 0 ? priorityWinningSamples : winningSamples;
+
+    if (focusSamples.length === 0) {
+        return null;
+    }
+
+    const current = apiResponse && apiResponse.current ? apiResponse.current : {};
+    const strongestSample = strongestSampleForKind(focusSamples);
+    const representativeCurrent = {
+        "time": String(current.time || focusSamples[0].time || ""),
+        "weather_code": (visualKind === RAIN_KIND || visualKind === SNOW_KIND || visualKind === THUNDERSTORM_KIND)
+            ? adjustedRepresentativeWeatherCode(visualKind, strongestSample)
+            : representativeWeatherCodeForSamples(focusSamples),
+        "is_day": numeric(current.is_day, numeric(focusSamples[0].is_day, 1))
+    };
+
+    for (let index = 0; index < DOMINANT_DAY_AVERAGE_FIELDS.length; index += 1) {
+        const fieldName = DOMINANT_DAY_AVERAGE_FIELDS[index];
+
+        if ((visualKind === RAIN_KIND || visualKind === THUNDERSTORM_KIND)
+                && (fieldName === "precipitation" || fieldName === "rain" || fieldName === "showers")) {
+            representativeCurrent[fieldName] = numeric(strongestSample && strongestSample[fieldName], 0);
+            continue;
+        }
+
+        if (visualKind === SNOW_KIND && fieldName === "snowfall") {
+            representativeCurrent[fieldName] = numeric(strongestSample && strongestSample[fieldName], 0);
+            continue;
+        }
+
+        representativeCurrent[fieldName] = averageHourlyField(focusSamples, fieldName);
+    }
+
+    return {
+        "currentData": representativeCurrent,
+        "outsideHoursSignal": outsideHoursSignal
+    };
 }
 
 function conditionLabelForCode(code) {
@@ -457,13 +785,13 @@ function sceneStateFromCurrentData(currentData) {
             : (kind === FOG_KIND
                 ? clamp(0.34 + (cloudCover * 0.28), 0.36, 0.72)
                 : (kind === THUNDERSTORM_KIND
-                    ? clamp(0.66 + (cloudCover * 0.24), 0.68, 0.96)
-                    : clamp(0.44 + (cloudCover * 0.32), 0.46, 0.88))));
+                    ? clamp(0.74 + (cloudCover * 0.22), 0.78, 0.98)
+                    : clamp(0.58 + (cloudCover * 0.34), 0.62, 0.96))));
     const cloudBandCount = kind === CLEAR_KIND
         ? (cloudOpacity > 0.08 ? 1 : 0)
         : (kind === CLOUDY_KIND
             ? (weatherCode === 1 ? 2 : (weatherCode === 2 ? 3 : 5))
-            : (kind === FOG_KIND ? 3 : (kind === THUNDERSTORM_KIND ? 5 : 4)));
+            : (kind === FOG_KIND ? 3 : (kind === THUNDERSTORM_KIND ? 5 : (kind === RAIN_KIND ? 5 : 4))));
     const cloudFamily = kind === CLEAR_KIND
         ? "none"
         : (kind === CLOUDY_KIND
@@ -479,15 +807,15 @@ function sceneStateFromCurrentData(currentData) {
         ? (weatherCode === 1 ? 0.84 : (weatherCode === 2 ? 0.46 : 0.08))
         : (kind === CLEAR_KIND
             ? 0.96
-            : (kind === FOG_KIND ? 0.18 : (kind === THUNDERSTORM_KIND ? 0.04 : 0.12)));
+            : (kind === FOG_KIND ? 0.18 : (kind === THUNDERSTORM_KIND ? 0.04 : (kind === RAIN_KIND ? 0.06 : 0.12))));
     const celestialVeilOpacity = kind === CLOUDY_KIND
         ? (weatherCode === 1 ? 0.12 : (weatherCode === 2 ? 0.2 : 0.32))
         : (kind === FOG_KIND
             ? 0.28
             : (kind === THUNDERSTORM_KIND
-                ? 0.3
+                ? 0.42
                 : (kind === RAIN_KIND
-                    ? (rainBand === "drizzle" ? 0.14 : (rainBand === "steady" ? 0.2 : 0.28))
+                    ? (rainBand === "drizzle" ? 0.22 : (rainBand === "steady" ? 0.32 : 0.42))
                     : (kind === SNOW_KIND ? (snowBand === "flurries" ? 0.12 : (snowBand === "steady" ? 0.18 : 0.26)) : 0))));
     const storminess = kind === THUNDERSTORM_KIND ? clamp(0.58 + (rainDensity * 0.22) + (windSpeed / 120) + (windStrength * 0.12), 0.58, 1) : 0;
     const orbOcclusionOpacity = kind === CLOUDY_KIND
@@ -495,26 +823,26 @@ function sceneStateFromCurrentData(currentData) {
         : (kind === FOG_KIND
             ? 0.36 + (cloudCover * 0.16)
             : (kind === THUNDERSTORM_KIND
-                ? 0.62 + (storminess * 0.1)
+                ? 0.72 + (storminess * 0.12)
                 : (kind === RAIN_KIND
-                    ? (rainBand === "drizzle" ? 0.26 : (rainBand === "steady" ? 0.4 : 0.56))
+                    ? (rainBand === "drizzle" ? 0.42 : (rainBand === "steady" ? 0.58 : 0.76))
                     : (kind === SNOW_KIND
                         ? (snowBand === "flurries" ? 0.22 : (snowBand === "steady" ? 0.34 : 0.46))
                         : 0))));
     const orbOcclusionBands = kind === CLOUDY_KIND
         ? (weatherCode === 1 ? 2 : (weatherCode === 2 ? 3 : 4))
-        : (kind === FOG_KIND ? 3 : (kind === THUNDERSTORM_KIND ? 5 : ((kind === RAIN_KIND || kind === SNOW_KIND) ? 4 : 0)));
+        : (kind === FOG_KIND ? 3 : (kind === THUNDERSTORM_KIND ? 5 : (kind === RAIN_KIND ? 5 : (kind === SNOW_KIND ? 4 : 0))));
     const fogOpacity = kind === FOG_KIND
         ? clamp(0.42 + (cloudCover * 0.24), 0.44, 0.84)
         : (kind === RAIN_KIND && rainBand === "downpour"
-            ? clamp(0.08 + (rainDensity * 0.12), 0.08, 0.2)
+            ? clamp(0.14 + (rainDensity * 0.18), 0.14, 0.3)
             : (kind === SNOW_KIND && snowBand === "heavy"
                 ? clamp(0.06 + (snowDensity * 0.08), 0.06, 0.16)
                 : 0));
     const fogDepth = kind === FOG_KIND
         ? clamp(0.58 + (cloudCover * 0.2) + (windStrength * 0.08), 0.62, 0.96)
         : (kind === RAIN_KIND
-            ? clamp(0.16 + (rainDensity * 0.18) + (rainBand === "downpour" ? 0.1 : 0), 0.14, 0.48)
+            ? clamp(0.24 + (rainDensity * 0.28) + (rainBand === "downpour" ? 0.12 : 0.04), 0.22, 0.58)
             : (kind === SNOW_KIND ? clamp(0.1 + (snowDensity * 0.16) + (snowBand === "heavy" ? 0.08 : 0), 0.08, 0.36) : 0));
     const humidityHazeBase = clamp((humidity - 0.52) / 0.4, 0, 1);
     const humidityBloomBase = clamp((humidity - 0.62) / 0.32, 0, 1);
@@ -523,30 +851,31 @@ function sceneStateFromCurrentData(currentData) {
         (humidityHazeBase * (kind === CLEAR_KIND ? 0.18 : 0.28))
         + (cloudOpacity * humidityHazeBase * 0.18)
         + (kind === FOG_KIND ? 0.22 : 0)
-        + (kind === RAIN_KIND ? 0.08 : 0),
+        + (kind === RAIN_KIND ? 0.12 : 0),
         0,
         0.84
     );
     const skyDimming = clamp(
-        (cloudOpacity * 0.2)
-        + (fogOpacity * 0.12)
-        + (storminess * 0.24)
-        + (kind === RAIN_KIND ? rainDensity * 0.08 : 0)
-        + (humidityHaze * 0.08),
+        (cloudOpacity * 0.26)
+        + (fogOpacity * 0.16)
+        + (storminess * 0.28)
+        + (kind === RAIN_KIND ? rainDensity * 0.18 : 0)
+        + (humidityHaze * 0.1),
         0,
-        0.7
+        0.84
     );
     const contrastSoftening = clamp(
-        (cloudOpacity * 0.18)
+        (cloudOpacity * 0.22)
         + (fogOpacity * 0.34)
         + (kind === SNOW_KIND ? snowDensity * 0.12 : 0)
-        + (humidityHaze * 0.12),
+        + (humidityHaze * 0.14)
+        + (kind === RAIN_KIND ? rainDensity * 0.08 : 0),
         0,
-        0.72
+        0.78
     );
     const starVisibilityFactor = kind === CLOUDY_KIND
         ? clamp(1 - (cloudOpacity * 0.82) - ((1 - cloudBreakFactor) * 0.18), 0.08, 1)
-        : clamp(1 - (cloudOpacity * 0.92) - (fogOpacity * 0.75) - (storminess * 0.45), 0, 1);
+        : clamp(1 - (cloudOpacity * 1.08) - (fogOpacity * 0.82) - (storminess * 0.5) - (kind === RAIN_KIND ? rainDensity * 0.2 : 0), 0, 1);
     const humidityBloom = clamp(
         humidityBloomBase
         * (kind === THUNDERSTORM_KIND ? 0.22 : (kind === FOG_KIND ? 0.38 : 0.62))
@@ -556,12 +885,20 @@ function sceneStateFromCurrentData(currentData) {
         0.72
     );
     const sunGlowFactor = kind === CLOUDY_KIND
-        ? clamp(1 - (cloudOpacity * 0.46) - (celestialVeilOpacity * 0.34), 0.26, 1)
-        : clamp(1 - (cloudOpacity * 0.58) - (fogOpacity * 0.38) - (storminess * 0.24) - (humidityHaze * 0.1), 0.18, 1);
+        ? clamp(1 - (cloudOpacity * 0.58) - (celestialVeilOpacity * 0.42), 0.18, 1)
+        : (kind === RAIN_KIND
+            ? clamp(1 - (cloudOpacity * 0.92) - (fogOpacity * 0.54) - (humidityHaze * 0.16) - (rainDensity * 0.24), 0.04, 0.42)
+            : (kind === THUNDERSTORM_KIND
+                ? clamp(1 - (cloudOpacity * 1.02) - (fogOpacity * 0.42) - (storminess * 0.34) - (humidityHaze * 0.16), 0.02, 0.26)
+                : clamp(1 - (cloudOpacity * 0.58) - (fogOpacity * 0.38) - (storminess * 0.24) - (humidityHaze * 0.1), 0.18, 1)));
     const moonGlowFactor = kind === CLOUDY_KIND
-        ? clamp(1 - (cloudOpacity * 0.3) - (celestialVeilOpacity * 0.22), 0.42, 1)
-        : clamp(1 - (cloudOpacity * 0.42) - (fogOpacity * 0.28) - (storminess * 0.12) - (humidityHaze * 0.08), 0.3, 1);
-    const horizonFade = clamp((fogOpacity * 0.52) + (rainDensity * 0.18) + (storminess * 0.2), 0, 0.78);
+        ? clamp(1 - (cloudOpacity * 0.36) - (celestialVeilOpacity * 0.28), 0.34, 1)
+        : (kind === RAIN_KIND
+            ? clamp(1 - (cloudOpacity * 0.62) - (fogOpacity * 0.34) - (humidityHaze * 0.12) - (rainDensity * 0.12), 0.18, 0.7)
+            : (kind === THUNDERSTORM_KIND
+                ? clamp(1 - (cloudOpacity * 0.74) - (fogOpacity * 0.32) - (storminess * 0.2) - (humidityHaze * 0.12), 0.16, 0.56)
+                : clamp(1 - (cloudOpacity * 0.42) - (fogOpacity * 0.28) - (storminess * 0.12) - (humidityHaze * 0.08), 0.3, 1)));
+    const horizonFade = clamp((fogOpacity * 0.58) + (rainDensity * 0.32) + (storminess * 0.24) + (kind === RAIN_KIND ? cloudOpacity * 0.08 : 0), 0, 0.9);
     const brokenShadowPeak = clamp(1 - (Math.abs(cloudOpacity - 0.44) / 0.44), 0, 1);
     const familyShadowBias = cloudFamily === "cumulus"
         ? 1
@@ -640,6 +977,18 @@ function sceneStateFromApiResponse(apiResponse) {
             "status": "error",
             "conditionLabel": "Invalid response"
         });
+    }
+
+    const representativeHourlyState = representativeCurrentDataFromHourly(apiResponse);
+
+    if (representativeHourlyState) {
+        const dominantScene = sceneStateFromCurrentData(representativeHourlyState.currentData);
+        const outsideHoursSignal = representativeHourlyState.outsideHoursSignal;
+
+        dominantScene.postRainClearingEligible = false;
+        dominantScene.outsideHoursSignalKind = outsideHoursSignal ? outsideHoursSignal.kind : "";
+        dominantScene.outsideHoursSignalLabel = outsideHoursSignal ? outsideHoursSignal.label : "";
+        return normalizeSceneState(dominantScene);
     }
 
     return sceneStateFromCurrentData(apiResponse.current);

@@ -123,6 +123,7 @@ TestCase {
         verify(url.indexOf("longitude=139.744722") !== -1);
         verify(url.indexOf("timezone=Asia%2FTokyo") !== -1);
         verify(url.indexOf("current=") !== -1);
+        verify(url.indexOf("hourly=weather_code,is_day,precipitation,rain,showers,snowfall,cloud_cover,relative_humidity_2m,wind_speed_10m,wind_direction_10m") !== -1);
         verify(url.indexOf("relative_humidity_2m") !== -1);
         verify(url.indexOf("daily=apparent_temperature_max") !== -1);
         verify(url.indexOf("temperature_unit=celsius") !== -1);
@@ -179,5 +180,28 @@ TestCase {
         verify(derived.clearingStrength > 0.75);
         verify(derived.cloudOpacity > clearScene.cloudOpacity);
         verify(derived.humidityHaze > 0.2);
+    }
+
+    function test_forecastAggregateSkipsPostRainClearing() {
+        const source = createSource();
+        const aggregateScene = WeatherScene.normalizeSceneState({
+            "available": true,
+            "status": "ready",
+            "kind": "cloudy",
+            "conditionLabel": "Cloudy",
+            "cloudOpacity": 0.42,
+            "cloudFamily": "stratus",
+            "postRainClearingEligible": false
+        });
+        const nowMs = 1000000;
+
+        source.lastRainTimestampMs = nowMs;
+
+        const derived = source.derivedSceneStateForRaw(aggregateScene, nowMs + (source.postRainClearingDurationMs * 0.2));
+
+        compare(derived.kind, "cloudy");
+        compare(derived.conditionLabel, "Cloudy");
+        compare(derived.clearingStrength, 0);
+        compare(derived.postRainClearingEligible, false);
     }
 }
